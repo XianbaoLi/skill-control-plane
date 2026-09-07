@@ -17,6 +17,7 @@ skill-control-plane = "skill_control_plane.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+dense = ["sentence-transformers>=3.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
