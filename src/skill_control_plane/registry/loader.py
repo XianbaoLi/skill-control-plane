@@ -50,7 +50,7 @@ def load_skill_tree(root: str | Path) -> list[SkillRecord]:
         frontmatter, body = _split_frontmatter(raw)
         skill_id = str(frontmatter.get("name") or skill_md.parent.name).strip()
         relative_path = skill_md.resolve().relative_to(root_path)
-        category = relative_path.parts[0] if len(relative_path.parts) > 2 else ""
+        category = relative_path.parts[0] if len(relative_path.parts) > 1 else ""
         skills.append(
             SkillRecord(
                 skill_id=skill_id,
