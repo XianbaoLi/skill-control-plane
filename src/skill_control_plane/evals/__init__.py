@@ -1,4 +1,4 @@
-from .bundles import evaluate_bundle_trajectory
+from .bundles import evaluate_bundle_trajectory, evaluate_stage_bundle_cases
 from .control_plane import (
     MultiSkillGoldCase,
     StageGold,
@@ -25,6 +25,7 @@ __all__ = [
     "StageTransitionGoldCase",
     "diagnose_stage_retrieval",
     "evaluate_bundle_trajectory",
+    "evaluate_stage_bundle_cases",
     "evaluate_control_plane",
     "evaluate_stage_reroute",
     "evaluate_union_retrieval",
