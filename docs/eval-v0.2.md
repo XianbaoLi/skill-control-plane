@@ -146,9 +146,12 @@ Those belong to later levels:
 
 ```text
 L1: raw evidence -> Retriever
-L2: raw evidence -> LLM state interpreter -> Retriever
-L3: raw evidence -> interpreter -> Retriever -> runtime judge
+L2: raw evidence -> reuse Agent interpretation -> Retriever
+L3: insufficient retrieval -> optional SRC enhancer -> Retriever
+L4: candidates -> Bundle/Shelf activation policy
 ```
+
+The L2/L3 split is intentional: semantic reasoning already produced by the main Agent is cheaper than issuing a new model call, so it must be measured separately.
 
 ## Current calibration cases
 
@@ -250,3 +253,25 @@ The first implementation deliberately uses deterministic metadata grouping (cate
 The initial task remains available for final task/stage alignment, but it is no longer required inside every capability-discovery query. This directly tests the anchoring concern exposed by the current A/B/C diagnostics.
 
 See `docs/architecture-v0.2.md` for the runtime design.
+
+
+## Selective SRC escalation metrics
+
+The runtime now records which retrieval-cost tier resolved each transition:
+
+```text
+RAW
+  -> AGENT_AUGMENTED
+       -> SRC_ENHANCED
+```
+
+The evaluator exposes:
+
+- `raw_resolution_rate`: transitions resolved by raw + structured evidence;
+- `agent_reuse_rate`: transitions that needed main-Agent interpretation but no extra enhancer;
+- `src_escalation_rate`: transitions that reached the SRC path;
+- `sufficient_phase_counts`: accepted results broken down by phase.
+
+These metrics are about **routing cost**, not final Skill correctness. They must be read together with target-Skill recall/rank and Bundle coverage.
+
+A real LLM-backed SRC enhancer remains deliberately optional. The current runtime only defines the provider-neutral interface and records the escalation trace.
