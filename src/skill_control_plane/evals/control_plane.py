@@ -257,7 +257,7 @@ def evaluate_control_plane(
             if not reroute_missing:
                 reroute_full_coverage += 1
 
-            # S1 is initialization, not recovery. Recovery measures only skills
+            # S1 is initialization, not recovery. Recovery measures only Skills
             # introduced by a transition after the initial stage.
             recovery_target = set(stage.new_required) if stage_index > 0 else set()
             recovery_hits = recovery_target & reroute_set
@@ -271,6 +271,7 @@ def evaluate_control_plane(
                     "query": query,
                     "required_now": list(stage.required_now),
                     "new_required": list(stage.new_required),
+                    "recovery_target": sorted(recovery_target),
                     "one_shot_required_hits": sorted(required & one_shot_set),
                     "one_shot_missing_required": sorted(one_shot_missing),
                     "reroute_required_hits": sorted(required & reroute_set),
@@ -285,12 +286,8 @@ def evaluate_control_plane(
 
     multi_case_count = len(multi_skill_cases)
     stage_case_count = len(stage_transition_cases)
-    one_shot_rate = (
-        one_shot_full_coverage / stage_total if stage_total else 1.0
-    )
-    reroute_rate = (
-        reroute_full_coverage / stage_total if stage_total else 1.0
-    )
+    one_shot_rate = one_shot_full_coverage / stage_total if stage_total else 1.0
+    reroute_rate = reroute_full_coverage / stage_total if stage_total else 1.0
 
     return {
         "k_per_retriever": k,
@@ -329,9 +326,7 @@ def evaluate_control_plane(
             "new_required_skill_count": new_required_total,
             "new_required_skill_hits": new_required_hits,
             "average_reroute_candidate_set_size": (
-                reroute_candidate_total / stage_total
-                if stage_total
-                else 0.0
+                reroute_candidate_total / stage_total if stage_total else 0.0
             ),
             "stages": stage_rows,
         },
