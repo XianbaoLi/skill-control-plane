@@ -1,106 +1,158 @@
-# Evaluation Plan V0.2 — Control Plane
+# Evaluation Plan V0.2 — Stage Reroute L1
 
-V0.2 moves beyond single-Skill retrieval sanity checks and evaluates two
-behaviors that matter to a Skill control plane:
+V0.2 currently focuses on the first clean stage-transition experiment:
 
-1. preserving a complete set of Skills for a compositional task;
-2. recovering newly required Skills when the task state changes.
+```text
+raw runtime evidence
+        |
+        v
+BM25 + Dense retrieval
+        |
+        v
+candidate union
+        |
+        v
+compare with Gold required_now / new_required
+```
 
-## Gold sets
+There is no LLM state interpreter and no runtime activation judge in this level.
 
-### Multi-Skill
+Multi-Skill evaluation is parked for a later round so the stage-reroute
+methodology can be validated independently.
 
-`evals/gold/multi-skill-v0.2.jsonl`
-
-Each case has one initial task and a required Skill set with at least two Skills.
-
-Primary metrics:
-
-- **required Skill recall** — required Skills recovered across all cases;
-- **full required-set coverage** — fraction of tasks for which every required
-  Skill is present in the candidate set;
-- **average candidate-set size** — downstream context/cost proxy.
-
-### Stage transition
+## Gold
 
 `evals/gold/stage-transition-v0.2.jsonl`
 
-Each case is a task trajectory. Every stage records:
+Each case contains:
 
-- current observed state;
-- transition trigger, when present;
-- `required_now`;
-- `new_required`.
+- `initial_task`: the original user task;
+- `stages`: the task trajectory.
 
-The first stage is initialization. `new_required` on later stages is the
-recovery target created by a state transition.
+Each stage contains:
+
+- `runtime_evidence`: raw facts/messages/tool outputs available at runtime;
+- `required_now`: Gold Skills required at this stage;
+- `new_required`: Skills newly required at this stage;
+- `useful` and `hard_negative`: annotation-only labels.
+
+Gold interpretations must never appear in `runtime_evidence`.
+
+Examples of valid runtime evidence:
+
+- a real traceback or failed test line;
+- an email message body;
+- a user follow-up request;
+- a tool error;
+- a concrete CI status.
+
+Examples of invalid runtime evidence:
+
+- "this requires root-cause debugging";
+- "the task has transitioned to calendar mutation";
+- any annotation written because the labeler already knows the target Skill.
+
+## Retrieval query
+
+### S1
+
+S1 has no added runtime evidence:
+
+```text
+query = initial_task
+```
+
+Therefore the S1 reroute candidate set must be identical to the one-shot
+candidate set. The evaluator asserts this invariant.
+
+### S2+
+
+Later stages use:
+
+```text
+query =
+initial_task
++
+current stage raw runtime evidence
+```
+
+This still gives the retriever the persistent task goal, but adds no artificial
+LLM or human semantic interpretation.
 
 ## Baselines
 
 ### One-shot
 
-Retrieve once from the initial task and hold that candidate set fixed for every
-later stage.
+Retrieve once from `initial_task` and hold that candidate set fixed.
 
-This approximates routing systems that choose capabilities only at task start.
+### Raw-evidence reroute
 
-### Dynamic reroute
+Re-run retrieval at every stage using the query above.
 
-At every stage, retrieve again from:
+## Metrics
+
+### one_shot_stage_full_coverage
+
+Fraction of stages where the initial candidate set contains every
+`required_now` Skill.
+
+### reroute_stage_full_coverage
+
+Fraction of stages where the current raw-evidence reroute candidate set contains
+every `required_now` Skill.
+
+### reroute_gain
 
 ```text
-initial task
-+ transition trigger
-+ current observed state
+reroute_stage_full_coverage - one_shot_stage_full_coverage
 ```
 
-This approximates a control plane that reacts to failures, observations, and
-subgoal changes.
+Because S1 uses the exact same query under both methods, this gain can no longer
+come from giving S1 extra human-written state text.
 
-## Stage-transition metrics
+### transition_new_skill_recall
 
-- **one-shot stage full coverage** — fraction of stages whose full
-  `required_now` set is covered by the initial candidate set;
-- **reroute stage full coverage** — same metric after stage-aware retrieval;
-- **reroute gain** — reroute coverage minus one-shot coverage;
-- **new-skill recovery** — fraction of Skills newly required after a transition
-  that the reroute candidate set recovers;
-- **average reroute candidate-set size** — context/cost proxy.
+Among `new_required` Skills introduced after S1, how many appear in the current
+reroute candidate set.
 
-## What V0.2 does not yet measure
+This asks whether the new stage information points retrieval toward the newly
+needed capability.
 
-Candidate presence is not activation.
+### incremental_recovery
 
-The current repository does not yet contain a real runtime semantic judge that
-selects active Skills from the retrieved candidate set. Therefore these metrics
-are intentionally unavailable in V0.2 retrieval/reroute evaluation:
+A stricter metric.
+
+It considers only transition Skills that were **absent from the original
+one-shot candidate set**, and asks how many are recovered after rerouting.
+
+A Skill that was already present at task start is not counted as "recovered."
+
+### average_reroute_candidate_set_size
+
+Context/cost proxy for the downstream judge.
+
+## Not measured yet
+
+Candidate presence is not Skill activation.
+
+L1 does not measure:
 
 - active-Skill precision;
-- hard-negative activation rate;
-- premature activation rate.
+- hard-negative activation;
+- premature activation;
+- LLM state interpretation quality.
 
-Those require the next layer:
+Those belong to later levels:
 
 ```text
-BM25 + Dense
-    |
-candidate union
-    |
-runtime LLM judge
-    |
-active Skills
+L1: raw evidence -> Retriever
+L2: raw evidence -> LLM state interpreter -> Retriever
+L3: raw evidence -> interpreter -> Retriever -> runtime judge
 ```
 
-Hard-negative labels remain in Gold so they can be used once that judge exists.
+## Current calibration cases
 
-## First calibrated cases
+- `ST-01`: issue-to-PR -> reproducible Python failure -> step-through debugging -> PR review;
+- `ST-03`: terminal inbox triage -> email requests meeting -> user approves calendar action.
 
-The first reviewed batch contains:
-
-- `MS-01`: OCR -> document action extraction -> Notion;
-- `MS-06`: inbox-triage workflow + terminal email connector;
-- `ST-01`: issue-to-PR -> systematic debugging -> Python debugger -> PR review;
-- `ST-03`: terminal inbox triage -> Calendar mutation.
-
-These are calibration cases, not yet a statistically strong benchmark. Expand
-only after the evaluator and label semantics are stable.
+These are calibration cases, not a statistically strong benchmark.
