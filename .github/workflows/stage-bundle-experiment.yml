@@ -19,7 +19,7 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Fetch frozen Hermes Skill corpus
+      - name: Fetch frozen public Hermes Skill corpus
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -32,40 +32,44 @@ jobs:
       - name: Install experiment dependencies
         run: python -m pip install -e ".[dev,dense]"
 
-      - name: Build and validate frozen corpus snapshot
+      - name: Build public corpus snapshot
         run: |
           skill-control-plane corpus snapshot hermes-skills \
             --output /tmp/hermes-manifest.json \
-            --source nousresearch/hermes-agent \
+            --source nousresearch/hermes-agent-public-skills \
             --harness-commit d5fd2e93666d20616dca932a488c64ddace2b917
 
           python - <<'PY'
           import json
-          expected = "1b7e524ea167fb9057423e999d94ba920e6f11817f7ce06fede3a46722bd4bf6"
+          expected_gold = "1b7e524ea167fb9057423e999d94ba920e6f11817f7ce06fede3a46722bd4bf6"
           manifest = json.load(open("/tmp/hermes-manifest.json"))
           print("skill_count:", manifest["skill_count"])
-          print("snapshot_id:", manifest["snapshot_id"])
-          if manifest["snapshot_id"] != expected:
+          print("actual_snapshot_id:", manifest["snapshot_id"])
+          print("gold_snapshot_id:", expected_gold)
+          print("snapshot_match:", manifest["snapshot_id"] == expected_gold)
+          if manifest["skill_count"] != 81:
               raise SystemExit(
-                  f"snapshot mismatch: expected={expected}, got={manifest['snapshot_id']}"
+                  f"unexpected public corpus size: {manifest['skill_count']}"
               )
           PY
 
-      - name: Run direct-evidence Stage Bundle baseline
+      - name: Run public-subset exploratory Stage Bundle baseline
         env:
           TOKENIZERS_PARALLELISM: "false"
         run: |
           python scripts/run_stage_bundle_experiment.py hermes-skills \
             --gold evals/gold/stage-transition-v0.2.jsonl \
             --manifest /tmp/hermes-manifest.json \
+            --allow-snapshot-mismatch \
+            --corpus-mode public_subset_exploratory \
             --dense-model sentence-transformers/multi-qa-MiniLM-L6-cos-v1 \
             --k 5 \
             --max-bundles 4 \
             --max-skills-per-bundle 4 \
-            --output artifacts/stage-bundle-direct-v0.2.json
+            --output artifacts/stage-bundle-public81-exploratory.json
 
       - name: Upload experiment report
         uses: actions/upload-artifact@v4
         with:
-          name: stage-bundle-direct-v0.2
-          path: artifacts/stage-bundle-direct-v0.2.json
+          name: stage-bundle-public81-exploratory
+          path: artifacts/stage-bundle-public81-exploratory.json
