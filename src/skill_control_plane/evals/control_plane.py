@@ -22,8 +22,7 @@ class MultiSkillGoldCase:
 @dataclass(frozen=True, slots=True)
 class StageGold:
     stage_id: str
-    observed_state: str
-    transition_trigger: str | None
+    runtime_evidence: tuple[str, ...]
     required_now: tuple[str, ...]
     new_required: tuple[str, ...]
     useful: tuple[str, ...]
@@ -110,6 +109,8 @@ def load_stage_transition_gold(path: str | Path) -> list[StageTransitionGoldCase
         for stage_number, raw_stage in enumerate(raw_stages, start=1):
             required_now = tuple(raw_stage.get("required_now", ()))
             new_required = tuple(raw_stage.get("new_required", ()))
+            runtime_evidence = tuple(raw_stage.get("runtime_evidence", ()))
+
             if not required_now:
                 raise ValueError(
                     f"gold line {line_number} stage {stage_number} has no required_now"
@@ -119,15 +120,20 @@ def load_stage_transition_gold(path: str | Path) -> list[StageTransitionGoldCase
                     f"gold line {line_number} stage {stage_number}: "
                     "new_required must be a subset of required_now"
                 )
+            if stage_number == 1 and runtime_evidence:
+                raise ValueError(
+                    f"gold line {line_number} stage 1 must not add runtime_evidence"
+                )
+            if stage_number > 1 and not runtime_evidence:
+                raise ValueError(
+                    f"gold line {line_number} stage {stage_number} "
+                    "must contain raw runtime_evidence"
+                )
+
             stages.append(
                 StageGold(
                     stage_id=str(raw_stage["stage_id"]),
-                    observed_state=str(raw_stage["observed_state"]),
-                    transition_trigger=(
-                        str(raw_stage["transition_trigger"])
-                        if raw_stage.get("transition_trigger")
-                        else None
-                    ),
+                    runtime_evidence=runtime_evidence,
                     required_now=required_now,
                     new_required=new_required,
                     useful=tuple(raw_stage.get("useful", ())),
@@ -157,11 +163,10 @@ def load_stage_transition_gold(path: str | Path) -> list[StageTransitionGoldCase
 
 
 def stage_retrieval_query(case: StageTransitionGoldCase, stage: StageGold) -> str:
-    parts = [case.initial_task]
-    if stage.transition_trigger:
-        parts.append(stage.transition_trigger)
-    parts.append(stage.observed_state)
-    return "\n".join(parts)
+    # L1 evaluation: no LLM state interpretation. Retrieval sees only the
+    # original user task plus raw runtime evidence observed at this stage.
+    # S1 has no runtime evidence, so this is exactly the one-shot query.
+    return "\n".join([case.initial_task, *stage.runtime_evidence])
 
 
 def _union_ids(query: str, *, bm25: Any, dense: Any, k: int) -> tuple[list[str], set[str]]:
@@ -175,6 +180,135 @@ def _union_ids(query: str, *, bm25: Any, dense: Any, k: int) -> tuple[list[str],
     )
     ordered_ids = [candidate.skill_id for candidate in union_candidates]
     return ordered_ids, set(ordered_ids)
+
+
+def evaluate_stage_reroute(
+    cases: list[StageTransitionGoldCase],
+    *,
+    bm25: Any,
+    dense: Any,
+    k: int,
+) -> dict[str, Any]:
+    if k <= 0:
+        raise ValueError("k must be positive")
+
+    rows: list[dict[str, Any]] = []
+    stage_total = 0
+    one_shot_full_coverage = 0
+    reroute_full_coverage = 0
+    transition_new_total = 0
+    transition_new_hits = 0
+    incremental_target_total = 0
+    incremental_target_hits = 0
+    already_present_transition_skills = 0
+    reroute_candidate_total = 0
+
+    for case in cases:
+        one_shot_ids, one_shot_set = _union_ids(
+            case.initial_task,
+            bm25=bm25,
+            dense=dense,
+            k=k,
+        )
+
+        for stage_index, stage in enumerate(case.stages):
+            query = stage_retrieval_query(case, stage)
+            reroute_ids, reroute_set = _union_ids(
+                query,
+                bm25=bm25,
+                dense=dense,
+                k=k,
+            )
+
+            if stage_index == 0 and reroute_ids != one_shot_ids:
+                raise AssertionError(
+                    f"{case.case_id}/{stage.stage_id}: "
+                    "S1 reroute candidates must equal one-shot candidates"
+                )
+
+            required = set(stage.required_now)
+            one_shot_missing = required - one_shot_set
+            reroute_missing = required - reroute_set
+
+            stage_total += 1
+            reroute_candidate_total += len(reroute_set)
+            if not one_shot_missing:
+                one_shot_full_coverage += 1
+            if not reroute_missing:
+                reroute_full_coverage += 1
+
+            transition_target = set(stage.new_required) if stage_index > 0 else set()
+            transition_hits = transition_target & reroute_set
+            transition_new_total += len(transition_target)
+            transition_new_hits += len(transition_hits)
+
+            # "Incremental recovery" counts only new Skills that the initial
+            # one-shot candidate set did not already contain.
+            incremental_target = transition_target - one_shot_set
+            incremental_hits = incremental_target & reroute_set
+            incremental_target_total += len(incremental_target)
+            incremental_target_hits += len(incremental_hits)
+            already_present_transition_skills += len(
+                transition_target & one_shot_set
+            )
+
+            rows.append(
+                {
+                    "case_id": case.case_id,
+                    "stage_id": stage.stage_id,
+                    "runtime_evidence": list(stage.runtime_evidence),
+                    "query": query,
+                    "required_now": list(stage.required_now),
+                    "new_required": list(stage.new_required),
+                    "one_shot_required_hits": sorted(required & one_shot_set),
+                    "one_shot_missing_required": sorted(one_shot_missing),
+                    "reroute_required_hits": sorted(required & reroute_set),
+                    "reroute_missing_required": sorted(reroute_missing),
+                    "transition_new_hits": sorted(transition_hits),
+                    "transition_new_missing": sorted(
+                        transition_target - reroute_set
+                    ),
+                    "incremental_recovery_target": sorted(incremental_target),
+                    "incremental_recovery_hits": sorted(incremental_hits),
+                    "incremental_recovery_missing": sorted(
+                        incremental_target - reroute_set
+                    ),
+                    "one_shot_candidate_ids": one_shot_ids,
+                    "reroute_candidate_ids": reroute_ids,
+                    "reroute_candidate_set_size": len(reroute_set),
+                }
+            )
+
+    one_shot_rate = one_shot_full_coverage / stage_total if stage_total else 1.0
+    reroute_rate = reroute_full_coverage / stage_total if stage_total else 1.0
+
+    return {
+        "case_count": len(cases),
+        "stage_count": stage_total,
+        "k_per_retriever": k,
+        "one_shot_stage_full_coverage": one_shot_rate,
+        "reroute_stage_full_coverage": reroute_rate,
+        "reroute_gain": reroute_rate - one_shot_rate,
+        "transition_new_skill_recall": (
+            transition_new_hits / transition_new_total
+            if transition_new_total
+            else 1.0
+        ),
+        "transition_new_skill_count": transition_new_total,
+        "transition_new_skill_hits": transition_new_hits,
+        "incremental_recovery": (
+            incremental_target_hits / incremental_target_total
+            if incremental_target_total
+            else 1.0
+        ),
+        "incremental_recovery_target_count": incremental_target_total,
+        "incremental_recovery_hits": incremental_target_hits,
+        "already_present_transition_skill_count": already_present_transition_skills,
+        "average_reroute_candidate_set_size": (
+            reroute_candidate_total / stage_total if stage_total else 0.0
+        ),
+        "stages": rows,
+    }
 
 
 def evaluate_control_plane(
@@ -222,73 +356,14 @@ def evaluate_control_plane(
             }
         )
 
-    stage_rows: list[dict[str, Any]] = []
-    stage_total = 0
-    one_shot_full_coverage = 0
-    reroute_full_coverage = 0
-    new_required_total = 0
-    new_required_hits = 0
-    reroute_candidate_total = 0
-
-    for case in stage_transition_cases:
-        one_shot_ids, one_shot_set = _union_ids(
-            case.initial_task,
-            bm25=bm25,
-            dense=dense,
-            k=k,
-        )
-
-        for stage_index, stage in enumerate(case.stages):
-            query = stage_retrieval_query(case, stage)
-            reroute_ids, reroute_set = _union_ids(
-                query,
-                bm25=bm25,
-                dense=dense,
-                k=k,
-            )
-            required = set(stage.required_now)
-            one_shot_missing = required - one_shot_set
-            reroute_missing = required - reroute_set
-
-            stage_total += 1
-            reroute_candidate_total += len(reroute_set)
-            if not one_shot_missing:
-                one_shot_full_coverage += 1
-            if not reroute_missing:
-                reroute_full_coverage += 1
-
-            # S1 is initialization, not recovery. Recovery measures only Skills
-            # introduced by a transition after the initial stage.
-            recovery_target = set(stage.new_required) if stage_index > 0 else set()
-            recovery_hits = recovery_target & reroute_set
-            new_required_total += len(recovery_target)
-            new_required_hits += len(recovery_hits)
-
-            stage_rows.append(
-                {
-                    "case_id": case.case_id,
-                    "stage_id": stage.stage_id,
-                    "query": query,
-                    "required_now": list(stage.required_now),
-                    "new_required": list(stage.new_required),
-                    "recovery_target": sorted(recovery_target),
-                    "one_shot_required_hits": sorted(required & one_shot_set),
-                    "one_shot_missing_required": sorted(one_shot_missing),
-                    "reroute_required_hits": sorted(required & reroute_set),
-                    "reroute_missing_required": sorted(reroute_missing),
-                    "new_required_recovered": sorted(recovery_hits),
-                    "new_required_missing": sorted(recovery_target - reroute_set),
-                    "one_shot_candidate_ids": one_shot_ids,
-                    "reroute_candidate_ids": reroute_ids,
-                    "reroute_candidate_set_size": len(reroute_set),
-                }
-            )
+    stage_report = evaluate_stage_reroute(
+        stage_transition_cases,
+        bm25=bm25,
+        dense=dense,
+        k=k,
+    )
 
     multi_case_count = len(multi_skill_cases)
-    stage_case_count = len(stage_transition_cases)
-    one_shot_rate = one_shot_full_coverage / stage_total if stage_total else 1.0
-    reroute_rate = reroute_full_coverage / stage_total if stage_total else 1.0
-
     return {
         "k_per_retriever": k,
         "multi_skill": {
@@ -312,24 +387,7 @@ def evaluate_control_plane(
             ),
             "cases": multi_rows,
         },
-        "stage_transition": {
-            "case_count": stage_case_count,
-            "stage_count": stage_total,
-            "one_shot_stage_full_coverage": one_shot_rate,
-            "reroute_stage_full_coverage": reroute_rate,
-            "reroute_gain": reroute_rate - one_shot_rate,
-            "new_skill_recovery": (
-                new_required_hits / new_required_total
-                if new_required_total
-                else 1.0
-            ),
-            "new_required_skill_count": new_required_total,
-            "new_required_skill_hits": new_required_hits,
-            "average_reroute_candidate_set_size": (
-                reroute_candidate_total / stage_total if stage_total else 0.0
-            ),
-            "stages": stage_rows,
-        },
+        "stage_transition": stage_report,
         "activation_metrics_available": False,
         "activation_metrics_note": (
             "Premature activation and active-Skill precision require a real "
