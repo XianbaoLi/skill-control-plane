@@ -14,12 +14,14 @@ from .retrieval import (
     evaluate_union_retrieval,
     load_runtime_retrieval_gold,
 )
+from .stage_diagnostics import diagnose_stage_retrieval
 
 __all__ = [
     "MultiSkillGoldCase",
     "RuntimeRetrievalGoldCase",
     "StageGold",
     "StageTransitionGoldCase",
+    "diagnose_stage_retrieval",
     "evaluate_control_plane",
     "evaluate_stage_reroute",
     "evaluate_union_retrieval",
