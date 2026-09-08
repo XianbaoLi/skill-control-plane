@@ -16,7 +16,9 @@ def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     if not lines or lines[0].strip() != "---":
         return {}, text
     try:
-        end = next(i for i, line in enumerate(lines[1:], start=1) if line.strip() == "---")
+        end = next(
+            i for i, line in enumerate(lines[1:], start=1) if line.strip() == "---"
+        )
     except StopIteration:
         return {}, text
     parsed = yaml.safe_load("\n".join(lines[1:end])) or {}
@@ -41,11 +43,14 @@ def _extract_tags(frontmatter: dict[str, Any]) -> tuple[str, ...]:
 def load_skill_tree(root: str | Path) -> list[SkillRecord]:
     """Load Agent-Skills-style directories containing SKILL.md files."""
 
+    root_path = Path(root).resolve()
     skills: list[SkillRecord] = []
-    for skill_md in sorted(Path(root).rglob("SKILL.md")):
+    for skill_md in sorted(root_path.rglob("SKILL.md")):
         raw = skill_md.read_text(encoding="utf-8-sig", errors="replace")
         frontmatter, body = _split_frontmatter(raw)
         skill_id = str(frontmatter.get("name") or skill_md.parent.name).strip()
+        relative_path = skill_md.resolve().relative_to(root_path)
+        category = relative_path.parts[0] if len(relative_path.parts) > 2 else ""
         skills.append(
             SkillRecord(
                 skill_id=skill_id,
@@ -55,6 +60,7 @@ def load_skill_tree(root: str | Path) -> list[SkillRecord]:
                 source_path=str(skill_md),
                 tags=_extract_tags(frontmatter),
                 content_hash=hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+                category=category,
             )
         )
     return skills
