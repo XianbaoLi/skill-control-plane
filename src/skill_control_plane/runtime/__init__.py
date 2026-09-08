@@ -5,6 +5,7 @@ from .bundles import (
     integrate_retrieval_delta,
 )
 from .evidence import EvidencePool
+from .llm_context import LLMStageContextEnhancer, build_src_prompt
 from .stage_retrieval import (
     RetrievalPhase,
     RetrievalTrace,
@@ -19,6 +20,7 @@ __all__ = [
     "CapabilityBundle",
     "CapabilityShelf",
     "EvidencePool",
+    "LLMStageContextEnhancer",
     "RetrievalPhase",
     "RetrievalTrace",
     "RerouteTrigger",
@@ -26,6 +28,7 @@ __all__ = [
     "StageRetrievalContext",
     "StageRetrievalResult",
     "build_capability_shelf",
+    "build_src_prompt",
     "detect_reroute_trigger",
     "integrate_retrieval_delta",
     "retrieve_for_stage",
