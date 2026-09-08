@@ -20,6 +20,9 @@ jobs:
           repository: NousResearch/hermes-agent
           ref: d5fd2e93666d20616dca932a488c64ddace2b917
           path: hermes-agent
+          sparse-checkout: skills
+          sparse-checkout-cone-mode: true
+          fetch-depth: 1
 
       - uses: actions/setup-python@v5
         with:
