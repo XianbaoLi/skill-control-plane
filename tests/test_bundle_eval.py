@@ -65,6 +65,9 @@ def test_bundle_trajectory_measures_shelf_reuse_and_new_bundle_rate() -> None:
     assert report["shelf_reuse_rate"] == 0.5
     assert report["new_bundle_rate"] == 0.5
     assert report["final_registered_skill_count"] == 4
+    assert report["initial_shelf_future_skill_recall"] == 0.0
+    assert report["initial_shelf_future_bundle_recall"] == 0.5
+    assert report["initial_shelf_future_bundle_hits"] == ["runtime"]
     assert report["stages"][1]["active_bundle_ids"] == ["testing", "runtime"]
     assert report["stages"][2]["active_bundle_ids"] == [
         "testing",
