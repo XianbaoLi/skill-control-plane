@@ -31,13 +31,7 @@ class SkillRecord:
 
     @property
     def search_text(self) -> str:
-        parts = [
-            self.name,
-            self.description,
-            " ".join(self.tags),
-            self.category,
-            self.body,
-        ]
+        parts = [self.name, self.description, " ".join(self.tags), self.body]
         return "\n".join(part for part in parts if part)
 
 
