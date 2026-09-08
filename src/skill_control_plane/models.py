@@ -27,6 +27,7 @@ class SkillRecord:
     source_path: str
     tags: tuple[str, ...] = ()
     content_hash: str = ""
+    category: str = ""
 
     @property
     def search_text(self) -> str:

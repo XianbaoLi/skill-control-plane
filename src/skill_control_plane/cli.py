@@ -10,6 +10,7 @@ from skill_control_plane.corpus import write_corpus_manifest
 from skill_control_plane.evals import (
     diagnose_stage_retrieval,
     evaluate_control_plane,
+    evaluate_stage_bundle_cases,
     evaluate_stage_reroute,
     evaluate_union_retrieval,
     load_multi_skill_gold,
@@ -96,6 +97,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Show all required targets, not only targets missed by B",
     )
     stage_diagnose.add_argument("--json", action="store_true", dest="as_json")
+
+    stage_bundle = eval_subparsers.add_parser(
+        "stage-bundle",
+        help="Evaluate Active Bundle + Capability Shelf over stage Gold",
+    )
+    stage_bundle.add_argument("root", help="Local Skill tree")
+    stage_bundle.add_argument(
+        "--gold",
+        required=True,
+        help="Stage-transition Gold JSONL with raw runtime_evidence",
+    )
+    stage_bundle.add_argument(
+        "--manifest",
+        required=True,
+        help="Corpus manifest whose snapshot_id the Gold set references",
+    )
+    stage_bundle.add_argument("--dense-model", default=DEFAULT_DENSE_MODEL)
+    stage_bundle.add_argument("--k", type=int, default=5)
+    stage_bundle.add_argument("--max-bundles", type=int, default=4)
+    stage_bundle.add_argument("--max-skills-per-bundle", type=int, default=4)
+    stage_bundle.add_argument("--json", action="store_true", dest="as_json")
 
     control_plane = eval_subparsers.add_parser(
         "control-plane",
@@ -329,6 +351,70 @@ def _print_stage_diagnostic_report(report: dict[str, object]) -> None:
         print(f"{label}: {count}")
 
 
+def _print_stage_bundle_report(report: dict[str, object]) -> None:
+    print("=== STAGE CAPABILITY BUNDLE EXPERIMENT ===")
+    print(f"cases: {int(report['case_count'])}")
+    print(f"stages: {int(report['stage_count'])}")
+    print(f"k_per_retriever: {int(report['k_per_retriever'])}")
+    print(f"max_bundles: {int(report['max_bundles'])}")
+    print(f"max_skills_per_bundle: {int(report['max_skills_per_bundle'])}")
+    print(
+        "initial_shelf_future_skill_recall: "
+        f"{float(report['initial_shelf_future_skill_recall']):.4f} "
+        f"({int(report['initial_shelf_future_skill_hits'])}/"
+        f"{int(report['future_transition_skill_count'])})"
+    )
+    print(
+        "initial_shelf_future_bundle_recall: "
+        f"{float(report['initial_shelf_future_bundle_recall']):.4f} "
+        f"({int(report['initial_shelf_future_bundle_hits'])}/"
+        f"{int(report['future_transition_bundle_count'])})"
+    )
+    print(f"shelf_reuse_rate: {float(report['shelf_reuse_rate']):.4f}")
+    print(f"new_bundle_rate: {float(report['new_bundle_rate']):.4f}")
+    print(
+        "mean_active_required_recall: "
+        f"{float(report['mean_active_required_recall']):.4f}"
+    )
+    print(
+        "mean_shelf_required_recall: "
+        f"{float(report['mean_shelf_required_recall']):.4f}"
+    )
+
+    rows = report["cases"]
+    assert isinstance(rows, list)
+    for case in rows:
+        assert isinstance(case, dict)
+        print()
+        print(f"[{case['case_id']}]")
+        print(
+            "  initial future skill recall: "
+            f"{float(case['initial_shelf_future_skill_recall']):.4f} "
+            f"hits={case['initial_shelf_future_skill_hits']}"
+        )
+        print(
+            "  initial future bundle recall: "
+            f"{float(case['initial_shelf_future_bundle_recall']):.4f} "
+            f"hits={case['initial_shelf_future_bundle_hits']}"
+        )
+        print(
+            "  shelf reuse / new bundle: "
+            f"{float(case['shelf_reuse_rate']):.4f} / "
+            f"{float(case['new_bundle_rate']):.4f}"
+        )
+        stages = case["stages"]
+        assert isinstance(stages, list)
+        for stage in stages:
+            assert isinstance(stage, dict)
+            print(
+                f"  {stage['stage_id']}: "
+                f"active={stage['active_bundle_ids']} "
+                f"shelf={stage['bundle_ids']} "
+                f"registered={int(stage['registered_skill_count'])} "
+                f"required_recall={float(stage['shelf_required_recall']):.3f}"
+            )
+
+
 def _print_control_plane_report(report: dict[str, object]) -> None:
     multi = report["multi_skill"]
     stage = report["stage_transition"]
@@ -455,6 +541,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
             _print_stage_diagnostic_report(report)
+        return 0
+
+    if args.command == "eval" and args.eval_command == "stage-bundle":
+        stage_cases = load_stage_transition_gold(args.gold)
+        _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
+        skills = load_skill_tree(args.root)
+        records = {skill.skill_id: skill for skill in skills}
+        metadata_skills = [replace(skill, body="") for skill in skills]
+        bm25 = BM25Retriever(metadata_skills)
+        dense = DenseRetriever(skills, model_name=args.dense_model)
+
+        report = evaluate_stage_bundle_cases(
+            stage_cases,
+            records,
+            bm25=bm25,
+            dense=dense,
+            k=args.k,
+            max_bundles=args.max_bundles,
+            max_skills_per_bundle=args.max_skills_per_bundle,
+        )
+
+        if args.as_json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            _print_stage_bundle_report(report)
         return 0
 
     if args.command == "eval" and args.eval_command == "control-plane":

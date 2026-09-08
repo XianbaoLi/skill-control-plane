@@ -1,3 +1,4 @@
+from .bundles import evaluate_bundle_trajectory, evaluate_stage_bundle_cases
 from .control_plane import (
     MultiSkillGoldCase,
     StageGold,
@@ -8,6 +9,7 @@ from .control_plane import (
     load_stage_transition_gold,
     stage_retrieval_query,
 )
+from .escalation import summarize_retrieval_escalation
 from .metrics import hard_negative_hit_rate, required_recall_at_k, target_skill_accuracy
 from .retrieval import (
     RuntimeRetrievalGoldCase,
@@ -22,6 +24,8 @@ __all__ = [
     "StageGold",
     "StageTransitionGoldCase",
     "diagnose_stage_retrieval",
+    "evaluate_bundle_trajectory",
+    "evaluate_stage_bundle_cases",
     "evaluate_control_plane",
     "evaluate_stage_reroute",
     "evaluate_union_retrieval",
@@ -31,5 +35,6 @@ __all__ = [
     "load_stage_transition_gold",
     "required_recall_at_k",
     "stage_retrieval_query",
+    "summarize_retrieval_escalation",
     "target_skill_accuracy",
 ]
