@@ -1,4 +1,4 @@
-from .control_plane import (
+from .bundles import evaluate_bundle_trajectory\nfrom .control_plane import (
     MultiSkillGoldCase,
     StageGold,
     StageTransitionGoldCase,
@@ -21,7 +21,7 @@ __all__ = [
     "RuntimeRetrievalGoldCase",
     "StageGold",
     "StageTransitionGoldCase",
-    "diagnose_stage_retrieval",
+    "diagnose_stage_retrieval",\n    "evaluate_bundle_trajectory",
     "evaluate_control_plane",
     "evaluate_stage_reroute",
     "evaluate_union_retrieval",
