@@ -156,3 +156,39 @@ L3: raw evidence -> interpreter -> Retriever -> runtime judge
 - `ST-03`: terminal inbox triage -> email requests meeting -> user approves calendar action.
 
 These are calibration cases, not a statistically strong benchmark.
+
+
+## Failure diagnosis: A/B/C query ablation
+
+When raw-evidence rerouting misses a required Skill, run the diagnostic evaluator
+before changing K, metadata, or retrieval algorithms.
+
+The same target Skill is ranked under three query constructions:
+
+```text
+A = initial_task
+B = initial_task + raw runtime evidence
+C = raw runtime evidence only
+```
+
+For every failed target, record:
+
+- BM25 full-corpus rank;
+- Dense full-corpus rank;
+- whether the target is present in the BM25@K ∪ Dense@K candidate union.
+
+Interpretation:
+
+- **ANCHORING_SIGNAL** — B misses the target but C brings it into the candidate
+  union. Keeping the initial goal is likely suppressing the current-stage signal.
+- **TOPK_BUDGET_SIGNAL** — B and C both miss at K, but the best target rank is
+  between K+1 and 2K. The representation is finding the Skill, but the candidate
+  budget may be too tight.
+- **REPRESENTATION_OR_RETRIEVER_SIGNAL** — the target remains farther away.
+  Investigate compact Skill metadata and retriever semantics before increasing K.
+
+These labels are diagnostic heuristics, not final causal claims. Always inspect
+the actual BM25 and Dense ranks.
+
+The default diagnostic output includes only required Skills missed by B, because
+those are the failures of the current L1 reroute path.
