@@ -14,27 +14,27 @@ jobs:
       - name: Checkout skill-control-plane
         uses: actions/checkout@v4
 
-      - name: Checkout frozen Hermes corpus
-        uses: actions/checkout@v4
-        with:
-          repository: NousResearch/hermes-agent
-          ref: d5fd2e93666d20616dca932a488c64ddace2b917
-          path: hermes-agent
-          sparse-checkout: skills
-          sparse-checkout-cone-mode: true
-          fetch-depth: 1
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
+
+      - name: Fetch frozen Hermes Skill corpus
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/fetch_github_skill_tree.py \
+            --repo NousResearch/hermes-agent \
+            --commit d5fd2e93666d20616dca932a488c64ddace2b917 \
+            --prefix skills \
+            --output hermes-skills
 
       - name: Install experiment dependencies
         run: python -m pip install -e ".[dev,dense]"
 
       - name: Build and validate frozen corpus snapshot
         run: |
-          skill-control-plane corpus snapshot hermes-agent/skills \
+          skill-control-plane corpus snapshot hermes-skills \
             --output /tmp/hermes-manifest.json \
             --source nousresearch/hermes-agent \
             --harness-commit d5fd2e93666d20616dca932a488c64ddace2b917
@@ -55,7 +55,7 @@ jobs:
         env:
           TOKENIZERS_PARALLELISM: "false"
         run: |
-          python scripts/run_stage_bundle_experiment.py hermes-agent/skills \
+          python scripts/run_stage_bundle_experiment.py hermes-skills \
             --gold evals/gold/stage-transition-v0.2.jsonl \
             --manifest /tmp/hermes-manifest.json \
             --dense-model sentence-transformers/multi-qa-MiniLM-L6-cos-v1 \
