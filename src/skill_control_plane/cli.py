@@ -199,18 +199,20 @@ def _print_control_plane_report(report: dict[str, object]) -> None:
         required = row["required_now"]
         one_hits = row["one_shot_required_hits"]
         reroute_hits = row["reroute_required_hits"]
-        new_required = row["new_required"]
+        recovery_target = row["recovery_target"]
         new_hits = row["new_required_recovered"]
         missing = row["reroute_missing_required"]
         assert isinstance(required, list)
         assert isinstance(one_hits, list)
         assert isinstance(reroute_hits, list)
-        assert isinstance(new_required, list)
+        assert isinstance(recovery_target, list)
         assert isinstance(new_hits, list)
         assert isinstance(missing, list)
 
         stage_name = f"{row['case_id']}/{row['stage_id']}"
-        new_display = "-" if not new_required else f"{len(new_hits)}/{len(new_required)}"
+        new_display = (
+            "-" if not recovery_target else f"{len(new_hits)}/{len(recovery_target)}"
+        )
         print(
             f"{stage_name:<12} "
             f"{len(one_hits):>2}/{len(required):<2} "
