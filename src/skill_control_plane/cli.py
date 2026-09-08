@@ -7,7 +7,13 @@ from dataclasses import replace
 from pathlib import Path
 
 from skill_control_plane.corpus import write_corpus_manifest
-from skill_control_plane.evals import evaluate_union_retrieval, load_runtime_retrieval_gold
+from skill_control_plane.evals import (
+    evaluate_control_plane,
+    evaluate_union_retrieval,
+    load_multi_skill_gold,
+    load_runtime_retrieval_gold,
+    load_stage_transition_gold,
+)
 from skill_control_plane.registry import load_skill_tree
 from skill_control_plane.retrieval import BM25Retriever, DEFAULT_DENSE_MODEL, DenseRetriever
 
@@ -46,19 +52,46 @@ def _build_parser() -> argparse.ArgumentParser:
     retrieval.add_argument("--k", type=int, default=5)
     retrieval.add_argument("--json", action="store_true", dest="as_json")
 
+    control_plane = eval_subparsers.add_parser(
+        "control-plane",
+        help="Evaluate multi-Skill coverage and one-shot vs dynamic rerouting",
+    )
+    control_plane.add_argument("root", help="Local Skill tree")
+    control_plane.add_argument("--multi-skill", required=True, help="Multi-Skill Gold JSONL")
+    control_plane.add_argument(
+        "--stage-transition",
+        required=True,
+        help="Stage-transition Gold JSONL",
+    )
+    control_plane.add_argument(
+        "--manifest",
+        required=True,
+        help="Corpus manifest whose snapshot_id the Gold sets reference",
+    )
+    control_plane.add_argument("--dense-model", default=DEFAULT_DENSE_MODEL)
+    control_plane.add_argument("--k", type=int, default=3)
+    control_plane.add_argument("--json", action="store_true", dest="as_json")
+
     return parser
 
 
-def _validate_snapshot(gold_path: str, manifest_path: str) -> None:
-    cases = load_runtime_retrieval_gold(gold_path)
+def _manifest_snapshot_id(manifest_path: str) -> str:
     manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-    gold_snapshot = cases[0].snapshot_id
-    manifest_snapshot = str(manifest.get("snapshot_id", ""))
+    return str(manifest.get("snapshot_id", ""))
+
+
+def _validate_snapshot_id(gold_snapshot: str, manifest_path: str) -> None:
+    manifest_snapshot = _manifest_snapshot_id(manifest_path)
     if manifest_snapshot != gold_snapshot:
         raise ValueError(
             "Gold/manifest snapshot mismatch: "
             f"gold={gold_snapshot}, manifest={manifest_snapshot}"
         )
+
+
+def _validate_snapshot(gold_path: str, manifest_path: str) -> None:
+    cases = load_runtime_retrieval_gold(gold_path)
+    _validate_snapshot_id(cases[0].snapshot_id, manifest_path)
 
 
 def _print_retrieval_report(report: dict[str, object]) -> None:
@@ -111,6 +144,106 @@ def _print_retrieval_report(report: dict[str, object]) -> None:
     )
 
 
+def _print_control_plane_report(report: dict[str, object]) -> None:
+    multi = report["multi_skill"]
+    stage = report["stage_transition"]
+    assert isinstance(multi, dict)
+    assert isinstance(stage, dict)
+
+    print("=== MULTI-SKILL ===")
+    print(f"{'CASE':<9} {'HIT':>7} {'SIZE':>6}  MISSING")
+    print("-" * 46)
+    multi_rows = multi["cases"]
+    assert isinstance(multi_rows, list)
+    for row in multi_rows:
+        assert isinstance(row, dict)
+        required = row["required"]
+        hits = row["required_hits"]
+        missing = row["missing_required"]
+        assert isinstance(required, list)
+        assert isinstance(hits, list)
+        assert isinstance(missing, list)
+        print(
+            f"{str(row['case_id']):<9} "
+            f"{len(hits):>2}/{len(required):<2} "
+            f"{int(row['candidate_set_size']):>6}  "
+            f"{', '.join(missing) if missing else '-'}"
+        )
+
+    print()
+    print(
+        "required_skill_recall: "
+        f"{float(multi['required_skill_recall']):.4f} "
+        f"({int(multi['required_skill_hits'])}/{int(multi['required_skill_count'])})"
+    )
+    print(
+        "full_required_set_coverage: "
+        f"{float(multi['full_required_set_coverage']):.4f}"
+    )
+    print(
+        "average_candidate_set_size: "
+        f"{float(multi['average_candidate_set_size']):.2f}"
+    )
+
+    print()
+    print("=== STAGE TRANSITION ===")
+    print(
+        f"{'STAGE':<12} {'ONE':>7} {'REROUTE':>9} "
+        f"{'NEW':>7} {'SIZE':>6}  REROUTE_MISSING"
+    )
+    print("-" * 72)
+    stage_rows = stage["stages"]
+    assert isinstance(stage_rows, list)
+    for row in stage_rows:
+        assert isinstance(row, dict)
+        required = row["required_now"]
+        one_hits = row["one_shot_required_hits"]
+        reroute_hits = row["reroute_required_hits"]
+        new_required = row["new_required"]
+        new_hits = row["new_required_recovered"]
+        missing = row["reroute_missing_required"]
+        assert isinstance(required, list)
+        assert isinstance(one_hits, list)
+        assert isinstance(reroute_hits, list)
+        assert isinstance(new_required, list)
+        assert isinstance(new_hits, list)
+        assert isinstance(missing, list)
+
+        stage_name = f"{row['case_id']}/{row['stage_id']}"
+        new_display = "-" if not new_required else f"{len(new_hits)}/{len(new_required)}"
+        print(
+            f"{stage_name:<12} "
+            f"{len(one_hits):>2}/{len(required):<2} "
+            f"{len(reroute_hits):>4}/{len(required):<2} "
+            f"{new_display:>7} "
+            f"{int(row['reroute_candidate_set_size']):>6}  "
+            f"{', '.join(missing) if missing else '-'}"
+        )
+
+    print()
+    print(
+        "one_shot_stage_full_coverage: "
+        f"{float(stage['one_shot_stage_full_coverage']):.4f}"
+    )
+    print(
+        "reroute_stage_full_coverage: "
+        f"{float(stage['reroute_stage_full_coverage']):.4f}"
+    )
+    print(f"reroute_gain: {float(stage['reroute_gain']):+.4f}")
+    print(
+        "new_skill_recovery: "
+        f"{float(stage['new_skill_recovery']):.4f} "
+        f"({int(stage['new_required_skill_hits'])}/"
+        f"{int(stage['new_required_skill_count'])})"
+    )
+    print(
+        "average_reroute_candidate_set_size: "
+        f"{float(stage['average_reroute_candidate_set_size']):.2f}"
+    )
+    print()
+    print("activation_metrics: unavailable (runtime judge not implemented)")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
 
@@ -156,6 +289,33 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
             _print_retrieval_report(report)
+        return 0
+
+    if args.command == "eval" and args.eval_command == "control-plane":
+        multi_cases = load_multi_skill_gold(args.multi_skill)
+        stage_cases = load_stage_transition_gold(args.stage_transition)
+        _validate_snapshot_id(multi_cases[0].snapshot_id, args.manifest)
+        _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
+        if multi_cases[0].snapshot_id != stage_cases[0].snapshot_id:
+            raise ValueError("multi-skill and stage-transition Gold snapshots differ")
+
+        skills = load_skill_tree(args.root)
+        metadata_skills = [replace(skill, body="") for skill in skills]
+        bm25 = BM25Retriever(metadata_skills)
+        dense = DenseRetriever(skills, model_name=args.dense_model)
+
+        report = evaluate_control_plane(
+            multi_cases,
+            stage_cases,
+            bm25=bm25,
+            dense=dense,
+            k=args.k,
+        )
+
+        if args.as_json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            _print_control_plane_report(report)
         return 0
 
     raise AssertionError("unreachable")
