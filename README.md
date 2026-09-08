@@ -65,3 +65,41 @@ See `docs/architecture-v0.1.md`, `docs/architecture-v0.2.md`, and `docs/eval-v0.
 ## Non-goals for V0.1
 
 No automatic lifecycle manager, Skill graph, hierarchy builder, multi-Skill DAG composer, marketplace, learned retriever, or automatic destructive mutation.
+
+
+## Stage Bundle experiment (V0.2)
+
+After creating or restoring the exact Skill snapshot referenced by
+`evals/gold/stage-transition-v0.2.jsonl`, run:
+
+```bash
+export HF_HUB_OFFLINE=1
+
+skill-control-plane eval stage-bundle \
+  /mnt/d/Hermes/skills \
+  --gold evals/gold/stage-transition-v0.2.jsonl \
+  --manifest local_artifacts/corpora/hermes-local-v0.1/manifest.json \
+  --dense-model sentence-transformers/multi-qa-MiniLM-L6-cos-v1 \
+  --k 5 \
+  --max-bundles 4 \
+  --max-skills-per-bundle 4
+```
+
+The first experiment intentionally uses:
+
+- S1 query = `initial_task`;
+- S2+ query = current raw runtime evidence only;
+- BM25 Top-K union Dense Top-K as the candidate pool;
+- deterministic category/tag grouping as the Bundle baseline;
+- no SRC/extra LLM call yet.
+
+Primary metrics:
+
+- `initial_shelf_future_skill_recall`: whether the initial Shelf already contains future required Skills;
+- `initial_shelf_future_bundle_recall`: whether it at least predicts the future capability group;
+- `shelf_reuse_rate`: later transitions that can reuse a previously discovered Bundle;
+- `new_bundle_rate`: later transitions that require a newly discovered capability group;
+- Active-vs-Shelf required-Skill recall.
+
+This experiment tests the value of retaining a compact Capability Shelf before
+adding retrieval-sufficiency thresholds or SRC semantic expansion.
