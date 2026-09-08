@@ -28,25 +28,42 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--max-bundles", type=int, default=4)
     parser.add_argument("--max-skills-per-bundle", type=int, default=4)
+    parser.add_argument("--allow-snapshot-mismatch", action="store_true")
+    parser.add_argument(
+        "--corpus-mode",
+        default="exact",
+        choices=("exact", "public_subset_exploratory"),
+    )
     parser.add_argument("--output")
     return parser
 
 
-def _validate_snapshot(gold_path: str, manifest_path: str) -> str:
+def _snapshot_info(
+    gold_path: str,
+    manifest_path: str,
+    *,
+    allow_mismatch: bool,
+) -> tuple[str, str, bool]:
     cases = load_stage_transition_gold(gold_path)
     manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-    snapshot_id = str(manifest.get("snapshot_id", ""))
-    if cases[0].snapshot_id != snapshot_id:
+    actual = str(manifest.get("snapshot_id", ""))
+    gold = cases[0].snapshot_id
+    matched = gold == actual
+    if not matched and not allow_mismatch:
         raise ValueError(
             "Gold/manifest snapshot mismatch: "
-            f"gold={cases[0].snapshot_id}, manifest={snapshot_id}"
+            f"gold={gold}, manifest={actual}"
         )
-    return snapshot_id
+    return gold, actual, matched
 
 
-def _print_summary(report: dict[str, object], snapshot_id: str) -> None:
+def _print_summary(report: dict[str, object]) -> None:
     print("=== STAGE CAPABILITY BUNDLE EXPERIMENT ===")
-    print(f"snapshot_id: {snapshot_id}")
+    print(f"corpus_mode: {report['corpus_mode']}")
+    print(f"gold_snapshot_id: {report['gold_snapshot_id']}")
+    print(f"actual_snapshot_id: {report['actual_snapshot_id']}")
+    print(f"snapshot_match: {report['snapshot_match']}")
+    print(f"skill_count: {report['skill_count']}")
     print(f"cases: {report['case_count']}")
     print(f"stages: {report['stage_count']}")
     print(f"k_per_retriever: {report['k_per_retriever']}")
@@ -63,14 +80,8 @@ def _print_summary(report: dict[str, object], snapshot_id: str) -> None:
         f"({int(report['initial_shelf_future_bundle_hits'])}/"
         f"{int(report['future_transition_bundle_count'])})"
     )
-    print(
-        "shelf_reuse_rate: "
-        f"{float(report['shelf_reuse_rate']):.4f}"
-    )
-    print(
-        "new_bundle_rate: "
-        f"{float(report['new_bundle_rate']):.4f}"
-    )
+    print(f"shelf_reuse_rate: {float(report['shelf_reuse_rate']):.4f}")
+    print(f"new_bundle_rate: {float(report['new_bundle_rate']):.4f}")
     print(
         "mean_active_required_recall: "
         f"{float(report['mean_active_required_recall']):.4f}"
@@ -116,9 +127,21 @@ def _print_summary(report: dict[str, object], snapshot_id: str) -> None:
 
 def main() -> int:
     args = _parser().parse_args()
-    snapshot_id = _validate_snapshot(args.gold, args.manifest)
-    cases = load_stage_transition_gold(args.gold)
+    gold_snapshot, actual_snapshot, matched = _snapshot_info(
+        args.gold,
+        args.manifest,
+        allow_mismatch=args.allow_snapshot_mismatch,
+    )
+    if args.corpus_mode == "exact" and not matched:
+        raise ValueError(
+            "corpus_mode=exact requires a matching Gold snapshot"
+        )
+    if args.corpus_mode != "exact" and matched:
+        raise ValueError(
+            "exploratory corpus mode should only be used for a snapshot mismatch"
+        )
 
+    cases = load_stage_transition_gold(args.gold)
     skills = load_skill_tree(args.root)
     records = {skill.skill_id: skill for skill in skills}
     bm25 = BM25Retriever([replace(skill, body="") for skill in skills])
@@ -133,10 +156,14 @@ def main() -> int:
         max_bundles=args.max_bundles,
         max_skills_per_bundle=args.max_skills_per_bundle,
     )
-    report["snapshot_id"] = snapshot_id
+    report["corpus_mode"] = args.corpus_mode
+    report["gold_snapshot_id"] = gold_snapshot
+    report["actual_snapshot_id"] = actual_snapshot
+    report["snapshot_match"] = matched
+    report["skill_count"] = len(skills)
     report["dense_model"] = args.dense_model
 
-    _print_summary(report, snapshot_id)
+    _print_summary(report)
 
     if args.output:
         output = Path(args.output)
