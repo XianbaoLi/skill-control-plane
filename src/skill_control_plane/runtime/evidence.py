@@ -15,7 +15,15 @@ class EvidencePool:
     structured_signals: tuple[str, ...] = ()
     agent_interpretation: tuple[str, ...] = ()
 
+    def raw_retrieval_text(self) -> str:
+        """Evidence available before reusing semantic Agent interpretation."""
+
+        parts = [*self.raw_runtime, *self.structured_signals]
+        return "\n".join(part.strip() for part in parts if part.strip())
+
     def direct_retrieval_text(self) -> str:
+        """All retrieval text available without an extra semantic model call."""
+
         parts = [
             *self.raw_runtime,
             *self.structured_signals,
