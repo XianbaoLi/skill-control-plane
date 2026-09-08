@@ -1,1 +1,259 @@
-# Architecture V0.2 — Stage Capability Bundles\n\n## Goal\n\nV0.2 changes runtime routing from fine-grained Skill switching into **stage-batched capability loading**.\n\n> Retrieve a high-recall candidate set, organize it into a small Capability Shelf, activate one useful Bundle for the current stage, and expand the working set only when runtime evidence reveals a missing capability.\n\nExisting V0.1/V0.2 raw-retrieval diagnostics remain as baselines.\n\n## Runtime flow\n\n```mermaid\nflowchart TD\n    T[Initial Task] --> R[Global Skill Retrieval]\n    R --> C[Candidate Pool]\n    C --> B[Bundle Builder]\n    B --> A[Active Capability Bundle]\n    B --> S[Capability Shelf]\n    A --> X[Agent Work]\n    X --> E[Evidence Pool]\n    E --> D[Direct Retrieval]\n    D --> G{Retrieval sufficient?}\n    G -->|yes| M[Capability Delta]\n    G -->|no| SRC[Stage Retrieval Context]\n    SRC --> D2[Enhanced Retrieval]\n    D2 --> M\n    M --> Q{Existing bundle matches?}\n    Q -->|yes| U[Expand / activate existing bundle]\n    Q -->|no| N[Create new bundle]\n    U --> X\n    N --> X\n    T --> J[Task / stage alignment]\n    M --> J\n```\n\n## Evidence Pool\n\nRuntime evidence is open-set, so V0.2 does not build a universal evidence preprocessor.\n\nThe Evidence Pool contains:\n\n- raw runtime outputs: stderr, tracebacks, test results and tool outputs;\n- structured signals: exit codes, HTTP status and explicit error types;\n- main-Agent interpretation already produced during normal reasoning.\n\nMain-Agent interpretation is kept as evidence because its semantic cost has already been paid.\n\n## Retrieval sufficiency, not evidence simplicity\n\nThe escalation question is not whether evidence is easy to understand. It is whether direct retrieval already surfaces a stable and useful capability candidate.\n\n```text\nEvidence Pool\n    |\n    v\nDirect Retrieval\n    |\n    +-- sufficient --> use candidates\n    |\n    +-- insufficient --> semantic enhancement\n```\n\nA short error can still be retrieval-poor if Skill metadata uses different language. A long log can be retrieval-sufficient when it contains strong capability terms. Thresholds therefore must be calibrated from Gold data rather than hand-written globally.\n\n## Stage Retrieval Context\n\nIf direct retrieval is insufficient, the system may construct a compact **Stage Retrieval Context (SRC)**.\n\nSRC is not root-cause diagnosis. It is only a retrieval-oriented semantic representation of the next capability likely to be useful.\n\nEscalation priority:\n\n1. direct raw/structured evidence retrieval;\n2. reuse main-Agent interpretation already in the Evidence Pool;\n3. only then use an extra general-LLM transformation if still necessary.\n\nRaw evidence remains an independent retrieval channel so a bad SRC cannot erase the original signal.\n\n## Capability Shelf and Active Bundle\n\nA retrieval pass should discover more than the single immediately activated Skill, but should not expose every Skill body.\n\n```text\nActive\n- CI & Test Debugging\n  - pytest-debugging\n  - github-actions\n  - flaky-test-debugging\n\nShelf\n- Runtime & Dependencies\n- Repository Inspection\n- Container Environment\n```\n\nThe **Active Bundle** is the current stage working set. The **Capability Shelf** preserves other capability directions discovered in the same retrieval pass as compact descriptors, so the Agent can recognize when a later runtime problem matches an already discovered direction.\n\n## Bundle generation\n\nA Bundle is a runtime working set, not a permanent taxonomy.\n\n```text\nBM25 Top-K union Dense Top-K\n        |\n        v\nCandidate Pool\n        |\n        v\nmetadata grouping / future clustering\n        |\n        v\nwithin-group relevance + redundancy control\n        |\n        v\nCapability Shelf\n```\n\nThe first implementation uses a deterministic metadata baseline:\n\n- prefer the Skill category;\n- otherwise use explicit tags;\n- preserve retrieval rank inside each group;\n- cap the number of bundles and Skills per bundle.\n\nThis baseline is intentionally replaceable. Later experiments can compare it with embedding clustering, MMR-style grouping or learned bundle selection.\n\n## Evidence-driven expansion\n\nNew evidence triggers another retrieval pass over the **global Skill registry**.\n\n```text\nnew evidence\n    |\n    v\nglobal retrieval\n    |\n    v\ndelta bundles\n    |\n    +-- same capability group --> expand / activate existing bundle\n    |\n    +-- new capability group --> create new bundle\n```\n\nExisting capabilities are not automatically deleted. V0.2 uses monotonic registration by default:\n\n```text\nRegisteredSkills(t) subseteq RegisteredSkills(t+1)\n```\n\nA later context policy may mark old bundles dormant without forgetting them.\n\n## Context and cache policy\n\nV0.2 separates three surfaces:\n\n| Surface | Content | Lifetime |\n|---|---|---|\n| Registry | all compact Skill metadata | session/global |\n| Capability Shelf | compact bundle descriptors | stable across a stage |\n| Skill body | full SKILL.md and references | progressive, on demand |\n\nThe system prefers a few coarse capability-surface changes over constant per-Skill mutation. A stage therefore behaves like a cache-friendly context epoch: expand once when a real capability gap appears, then keep the surface stable for several turns.\n\n## Initial task versus runtime evidence\n\nV0.2 no longer requires the initial task to be concatenated into every capability-discovery query.\n\n- Evidence/SRC discovers the missing capability.\n- Initial task plus current stage performs task alignment and decides whether the candidate is worth adding.\n\nThe old initial-task-plus-raw-evidence path remains a benchmark baseline because it is useful for measuring anchoring effects.\n\n## Runtime state\n\nMinimum runtime state:\n\n```text\nEvidencePool\nCapabilityShelf\nActive bundle ids\nRegistered Skill ids\n```\n\nA Bundle stores a stable id, compact descriptor, use-when summary, member Skill ids and best retrieval rank. Membership is authoritative; the descriptor is only a compressed discovery surface.\n\n## Implementation sequence\n\n1. Add EvidencePool and capability-bundle runtime models.\n2. Add deterministic candidate-to-shelf construction from existing metadata.\n3. Add monotonic integration of later retrieval deltas.\n4. Test active bundle creation, shelf preservation, existing-bundle expansion and new-bundle creation.\n5. Add bundle-level evaluation metrics.\n6. Calibrate direct-retrieval sufficiency from Gold cases.\n7. Add optional SRC generation and measure how often it truly needs an extra LLM call.\n8. Compare metadata grouping against embedding/MMR bundle formation.\n\n## Evaluation questions\n\n1. Does a Bundle cover a stage better than plain Top-K without excessive redundancy?\n2. How many later capability gaps match a Bundle already present on the Shelf?\n3. How often does new evidence require a truly new global capability group?\n4. How often can main-Agent reasoning avoid an extra LLM call?\n5. What is the token/cache tradeoff between per-Skill loading, monotonic full loading and Shelf plus stage-batched loading?\n\n## Non-goals\n\n- universal evidence ontology;\n- learned bundle clustering in the first baseline;\n- universal hand-written routing thresholds;\n- automatic destructive unloading;\n- permanent hand-designed Skill taxonomy;\n- root-cause diagnosis inside the control plane.\n
+# Architecture V0.2 — Stage Capability Bundles
+
+## Goal
+
+V0.2 changes runtime routing from fine-grained Skill switching into **stage-batched capability loading**.
+
+> Retrieve a high-recall candidate set, keep a compact Capability Shelf, activate a useful Bundle for the current stage, and expand the working set only when runtime evidence reveals a missing capability.
+
+Existing raw-retrieval diagnostics remain as baselines.
+
+## Runtime flow
+
+```mermaid
+flowchart TD
+    T[Initial Task] --> R[Global Skill Retrieval]
+    R --> C[Candidate Pool]
+    C --> B[Bundle Builder]
+    B --> A[Active Capability Bundle]
+    B --> S[Capability Shelf]
+
+    A --> X[Agent Work]
+    X --> E[Evidence Pool]
+
+    E --> R0[Raw / Structured Retrieval]
+    R0 --> G0{Sufficient?}
+    G0 -->|yes| M[Capability Delta]
+    G0 -->|no| AR[Reuse Main-Agent Interpretation]
+    AR --> G1{Sufficient?}
+    G1 -->|yes| M
+    G1 -->|no| SRC[Stage Retrieval Context]
+    SRC --> ER[Enhanced Retrieval + Fusion]
+    ER --> M
+
+    M --> Q{Existing bundle matches?}
+    Q -->|yes| U[Expand / Activate Bundle]
+    Q -->|no| N[Create New Bundle]
+    U --> X
+    N --> X
+```
+
+## Evidence Pool
+
+Runtime evidence is open-set, so V0.2 does not build a universal evidence preprocessor.
+
+The Evidence Pool contains:
+
+- raw runtime outputs: stderr, tracebacks, test results and tool outputs;
+- structured signals: exit codes, HTTP status and explicit error types;
+- main-Agent interpretation already produced during normal reasoning.
+
+The third source matters because its semantic reasoning cost has already been paid.
+
+## Retrieval sufficiency, not evidence simplicity
+
+The escalation question is not whether evidence looks simple. It is whether the current evidence representation already retrieves a stable and useful capability candidate.
+
+```text
+raw + structured evidence
+        |
+        v
+direct retrieval
+        |
+   sufficient?
+    /      \
+ yes       no
+ |          |
+use     add Agent interpretation
+            |
+       sufficient?
+        /      \
+      yes       no
+      |          |
+     use       SRC enhancer
+```
+
+No universal threshold is hard-coded. A harness must supply a sufficiency policy calibrated from Gold data.
+
+## Stage Retrieval Context
+
+**Stage Retrieval Context (SRC)** is a retrieval-oriented semantic expansion used only after cheaper paths fail.
+
+Example:
+
+```text
+Evidence:
+tests fail only in CI after cache restore
+
+SRC:
+CI cache contamination, environment isolation,
+and nondeterministic test diagnosis
+```
+
+SRC is **not** root-cause diagnosis and does not generate Bundles. Its only job is to make the missing capability easier to retrieve.
+
+The implemented escalation order is:
+
+1. raw + structured evidence;
+2. raw + structured + existing main-Agent interpretation;
+3. optional SRC enhancer.
+
+At step 3, SRC retrieval is fused with earlier evidence rankings so a bad semantic expansion does not erase the original evidence signal.
+
+The enhancer is a protocol, not a hard-wired provider. It may later be backed by a general LLM, but Bundle logic does not depend on any specific model API.
+
+## Capability Shelf and Active Bundle
+
+A retrieval pass may discover several useful capability directions without loading every Skill body.
+
+```text
+Active
+- CI & Test Debugging
+  - pytest-debugging
+  - github-actions
+  - flaky-test-debugging
+
+Shelf
+- Runtime & Dependencies
+- Repository Inspection
+- Container Environment
+```
+
+The **Active Bundle** is the current stage working set.
+
+The **Capability Shelf** keeps compact descriptors for other capability groups discovered in the same retrieval pass, so the main Agent can recognize a later capability gap without paying the cost of loading every Skill body.
+
+## Bundle generation
+
+A Bundle is a runtime working set, not a permanent taxonomy.
+
+```text
+BM25 Top-K union Dense Top-K
+        |
+        v
+Candidate Pool
+        |
+        v
+Bundle Builder
+        |
+        +-- Active Bundle
+        |
+        +-- Capability Shelf
+```
+
+The current deterministic baseline groups by:
+
+1. Skill category;
+2. otherwise explicit tag;
+3. otherwise per-Skill fallback.
+
+Retrieval rank is preserved inside each group. This is intentionally replaceable by embedding clustering, MMR or learned bundle selection after the baseline is measured.
+
+## Evidence-driven expansion
+
+New evidence still searches the **global Skill registry**.
+
+```text
+new evidence
+    |
+    v
+selective retrieval escalation
+    |
+    v
+candidate delta
+    |
+    +-- existing capability group --> expand / activate Bundle
+    |
+    +-- new capability group --> create Bundle
+```
+
+Existing capabilities are not automatically deleted.
+
+Default V0.2 policy:
+
+```text
+RegisteredSkills(t) subseteq RegisteredSkills(t+1)
+```
+
+A later context policy may mark old Bundles dormant without forgetting them.
+
+## Context and cache policy
+
+V0.2 separates three surfaces:
+
+| Surface | Content | Lifetime |
+|---|---|---|
+| Registry | all compact Skill metadata | session/global |
+| Capability Shelf | compact Bundle descriptors | stable across a stage |
+| Skill body | full SKILL.md and references | progressive, on demand |
+
+The system prefers a few coarse capability-surface changes over constant per-Skill mutation.
+
+A stage therefore behaves like a cache-friendly context epoch: expand once when a real capability gap appears, then keep the surface stable for multiple turns.
+
+## Initial task versus runtime evidence
+
+The initial task is not required inside every capability-discovery query.
+
+Responsibilities are separated:
+
+- **Evidence / SRC** discovers the missing capability.
+- **Initial task + current stage** performs task alignment and decides whether the candidate is worth adding.
+
+The old `initial_task + raw_evidence` query remains a benchmark baseline for measuring anchoring effects.
+
+## Runtime state
+
+Minimum runtime state:
+
+```text
+EvidencePool
+CapabilityShelf
+Active bundle ids
+Registered Skill ids
+Retrieval traces
+```
+
+Each retrieval trace records:
+
+- phase: raw / agent-augmented / SRC-enhanced;
+- query text;
+- returned candidates;
+- whether the configured sufficiency policy accepted the result.
+
+This makes semantic-cost escalation measurable rather than implicit.
+
+## Current implementation
+
+Implemented on the V0.2 feature branch:
+
+- EvidencePool with separate raw and Agent-augmented retrieval surfaces;
+- CapabilityShelf / CapabilityBundle;
+- deterministic Bundle grouping baseline;
+- monotonic retrieval-delta integration;
+- selective stage retrieval escalation;
+- SRC enhancer protocol;
+- raw/evidence ranking fusion for SRC fallback;
+- Bundle trajectory metrics;
+- escalation metrics:
+  - raw resolution rate;
+  - Agent-reuse rate;
+  - SRC escalation rate.
+
+## Next experiments
+
+1. Run the Hermes stage-transition Gold through the Bundle trajectory evaluator.
+2. Calibrate retrieval-sufficiency policies from target ranks / agreement signals.
+3. Measure how often Agent reasoning avoids SRC.
+4. Add a real general-LLM SRC provider only after the above baseline is measured.
+5. Compare metadata Bundle grouping with embedding/MMR grouping.
+6. Measure token/cache cost under per-Skill loading vs stage-batched loading.
+
+## Non-goals
+
+- universal evidence ontology;
+- root-cause diagnosis inside the control plane;
+- permanent hand-designed Skill taxonomy;
+- learned grouping before a deterministic baseline exists;
+- automatic destructive unloading;
+- a mandatory LLM call on every transition.
