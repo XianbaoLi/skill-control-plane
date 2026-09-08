@@ -8,6 +8,7 @@ from pathlib import Path
 
 from skill_control_plane.corpus import write_corpus_manifest
 from skill_control_plane.evals import (
+    diagnose_stage_retrieval,
     evaluate_control_plane,
     evaluate_stage_reroute,
     evaluate_union_retrieval,
@@ -71,6 +72,30 @@ def _build_parser() -> argparse.ArgumentParser:
     stage_reroute.add_argument("--dense-model", default=DEFAULT_DENSE_MODEL)
     stage_reroute.add_argument("--k", type=int, default=3)
     stage_reroute.add_argument("--json", action="store_true", dest="as_json")
+
+    stage_diagnose = eval_subparsers.add_parser(
+        "stage-diagnose",
+        help="Diagnose failed stage retrieval with A/B/C query ablations",
+    )
+    stage_diagnose.add_argument("root", help="Local Skill tree")
+    stage_diagnose.add_argument(
+        "--gold",
+        required=True,
+        help="Stage-transition Gold JSONL with raw runtime_evidence",
+    )
+    stage_diagnose.add_argument(
+        "--manifest",
+        required=True,
+        help="Corpus manifest whose snapshot_id the Gold set references",
+    )
+    stage_diagnose.add_argument("--dense-model", default=DEFAULT_DENSE_MODEL)
+    stage_diagnose.add_argument("--k", type=int, default=3)
+    stage_diagnose.add_argument(
+        "--all-targets",
+        action="store_true",
+        help="Show all required targets, not only targets missed by B",
+    )
+    stage_diagnose.add_argument("--json", action="store_true", dest="as_json")
 
     control_plane = eval_subparsers.add_parser(
         "control-plane",
@@ -251,6 +276,59 @@ def _print_stage_reroute_report(report: dict[str, object]) -> None:
     )
 
 
+
+def _rank_text(value: object) -> str:
+    return "-" if value is None else str(value)
+
+
+def _print_stage_diagnostic_report(report: dict[str, object]) -> None:
+    print("=== STAGE RETRIEVAL DIAGNOSTICS: A/B/C ===")
+    print("A = initial_task")
+    print("B = initial_task + raw runtime evidence")
+    print("C = raw runtime evidence only")
+    print()
+    print(
+        f"{'TARGET':<34} "
+        f"{'A BM25':>7} {'A DNS':>6} {'A@K':>4}  "
+        f"{'B BM25':>7} {'B DNS':>6} {'B@K':>4}  "
+        f"{'C BM25':>7} {'C DNS':>6} {'C@K':>4}  "
+        "DIAGNOSIS"
+    )
+    print("-" * 122)
+
+    rows = report["targets"]
+    assert isinstance(rows, list)
+    for row in rows:
+        assert isinstance(row, dict)
+        a = row["A_initial_task"]
+        b = row["B_initial_plus_raw"]
+        c = row["C_raw_only"]
+        assert isinstance(a, dict)
+        assert isinstance(b, dict)
+        assert isinstance(c, dict)
+        target_name = f"{row['case_id']}/{row['stage_id']}:{row['target_skill']}"
+        print(
+            f"{target_name:<34} "
+            f"{_rank_text(a['bm25_rank']):>7} "
+            f"{_rank_text(a['dense_rank']):>6} "
+            f"{('Y' if a['union_hit'] else 'N'):>4}  "
+            f"{_rank_text(b['bm25_rank']):>7} "
+            f"{_rank_text(b['dense_rank']):>6} "
+            f"{('Y' if b['union_hit'] else 'N'):>4}  "
+            f"{_rank_text(c['bm25_rank']):>7} "
+            f"{_rank_text(c['dense_rank']):>6} "
+            f"{('Y' if c['union_hit'] else 'N'):>4}  "
+            f"{row['diagnosis']}"
+        )
+
+    print()
+    print(f"diagnosed_target_count: {int(report['diagnosed_target_count'])}")
+    counts = report["diagnosis_counts"]
+    assert isinstance(counts, dict)
+    for label, count in sorted(counts.items()):
+        print(f"{label}: {count}")
+
+
 def _print_control_plane_report(report: dict[str, object]) -> None:
     multi = report["multi_skill"]
     stage = report["stage_transition"]
@@ -356,6 +434,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
             _print_stage_reroute_report(report)
+        return 0
+
+
+    if args.command == "eval" and args.eval_command == "stage-diagnose":
+        stage_cases = load_stage_transition_gold(args.gold)
+        _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
+        bm25, dense = _build_retrievers(args.root, args.dense_model)
+
+        report = diagnose_stage_retrieval(
+            stage_cases,
+            bm25=bm25,
+            dense=dense,
+            k=args.k,
+            rank_depth=len(bm25.skills),
+            only_missed=not args.all_targets,
+        )
+
+        if args.as_json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            _print_stage_diagnostic_report(report)
         return 0
 
     if args.command == "eval" and args.eval_command == "control-plane":
