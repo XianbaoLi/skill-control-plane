@@ -27,10 +27,17 @@ class SkillRecord:
     source_path: str
     tags: tuple[str, ...] = ()
     content_hash: str = ""
+    category: str = ""
 
     @property
     def search_text(self) -> str:
-        parts = [self.name, self.description, " ".join(self.tags), self.body]
+        parts = [
+            self.name,
+            self.description,
+            " ".join(self.tags),
+            self.category,
+            self.body,
+        ]
         return "\n".join(part for part in parts if part)
 
 
