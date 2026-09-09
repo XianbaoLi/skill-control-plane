@@ -11,7 +11,7 @@ The audit rule is strict:
 - `new_required`: the newly emerged capability is actually needed to satisfy the current stage.
 - `useful`: helpful methodology/context, but progress is still possible without loading it.
 - `hard_negative`: semantically nearby and therefore likely to be retrieved, but wrong for the resolved runtime need.
-- Runtime evidence describes observable facts and user requests; it never names the Gold target Skill.
+- Runtime evidence describes observable facts and user requests. Explicit external products/services named by the user may remain (for example Notion, Obsidian, Apple Notes), but catalog-only Skill identifiers and implementation-specific clues are excluded.
 
 ## Added targets
 
