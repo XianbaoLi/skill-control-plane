@@ -43,6 +43,11 @@ def main() -> None:
     parser.add_argument("--reasoning")
     parser.add_argument("--safe-mode", action="store_true")
     parser.add_argument("--audit-dir", type=Path)
+    parser.add_argument(
+        "--replay-dir",
+        type=Path,
+        help="Replay exact audited Hermes output for this prompt; no model call",
+    )
     parser.add_argument("--timeout", type=float, default=180.0)
     args = parser.parse_args()
 
@@ -50,6 +55,17 @@ def main() -> None:
     if not prompt.strip():
         raise ValueError("Harness prompt on stdin must not be empty")
     prompt_key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
+    if args.replay_dir:
+        artifact = args.replay_dir / f"{prompt_key}.json"
+        data = json.loads(artifact.read_text(encoding="utf-8"))
+        if data.get("prompt") != prompt or data.get("returncode") != 0:
+            raise ValueError("Replay must match the exact successful Hermes prompt")
+        stdout = data.get("stdout")
+        if not isinstance(stdout, str):
+            raise ValueError("Replay artifact has no stdout text")
+        sys.stdout.write(stdout.strip())
+        return
 
     command = [args.hermes, "--ignore-rules"]
     if args.safe_mode:
