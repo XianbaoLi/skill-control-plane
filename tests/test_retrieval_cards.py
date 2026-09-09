@@ -119,7 +119,7 @@ def test_retrieval_card_extractor_truncates_overlong_lists():
         description="Debug Python execution.",
         tags=("python", "debugging"),
         category="development",
-        relative_path="debug-python/SKILL.md",
+        source_path="/skills/debug-python/SKILL.md",
         content_hash="abc123",
         body="Use breakpoints and step through code when traceback inspection is insufficient.",
     )
