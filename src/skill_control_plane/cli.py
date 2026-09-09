@@ -9,6 +9,7 @@ from pathlib import Path
 from skill_control_plane.corpus import write_corpus_manifest
 from skill_control_plane.evals import (
     diagnose_stage_retrieval,
+    evaluate_capability_facet_retrieval,
     evaluate_control_plane,
     evaluate_stage_bundle_cases,
     evaluate_stage_reroute,
@@ -16,6 +17,7 @@ from skill_control_plane.evals import (
     load_multi_skill_gold,
     load_runtime_retrieval_gold,
     load_stage_transition_gold,
+    print_capability_facet_report,
 )
 from skill_control_plane.registry import load_skill_tree
 from skill_control_plane.retrieval import BM25Retriever, DEFAULT_DENSE_MODEL, DenseRetriever
@@ -127,6 +129,36 @@ def _build_parser() -> argparse.ArgumentParser:
     stage_bundle.add_argument("--capability-need-command",
                               help="Completion command: prompt on stdin, JSON on stdout (no shell)")
     stage_bundle.add_argument("--json", action="store_true", dest="as_json")
+
+    capability_facets = eval_subparsers.add_parser(
+        "capability-facets",
+        help="Compare old single rewrite with main-agent capability facets + multi-query RRF",
+    )
+    capability_facets.add_argument("root", help="Local Skill tree")
+    capability_facets.add_argument(
+        "--gold",
+        required=True,
+        help="Stage-transition Gold JSONL with raw runtime_evidence",
+    )
+    capability_facets.add_argument(
+        "--manifest",
+        required=True,
+        help="Corpus manifest whose snapshot_id the Gold set references",
+    )
+    capability_facets.add_argument("--dense-model", default=DEFAULT_DENSE_MODEL)
+    capability_facets.add_argument(
+        "--old-rewrite-command",
+        required=True,
+        help="Old capability_need completion command: prompt on stdin, JSON on stdout",
+    )
+    capability_facets.add_argument(
+        "--capability-facets-command",
+        required=True,
+        help="Main-agent facet completion command: prompt on stdin, JSON on stdout",
+    )
+    capability_facets.add_argument("--per-query-k", type=int, default=10)
+    capability_facets.add_argument("--rrf-k", type=int, default=60)
+    capability_facets.add_argument("--json", action="store_true", dest="as_json")
 
     control_plane = eval_subparsers.add_parser(
         "control-plane",
@@ -610,6 +642,40 @@ def main(argv: Sequence[str] | None = None) -> int:
             print_capability_need_report(report)
         else:
             _print_stage_bundle_report(report)
+        return 0
+
+    if args.command == "eval" and args.eval_command == "capability-facets":
+        stage_cases = load_stage_transition_gold(args.gold)
+        _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
+        bm25, dense = _build_retrievers(args.root, args.dense_model)
+
+        from skill_control_plane.runtime.capability_facets import (
+            LLMCapabilityFacetExtractor,
+        )
+        from skill_control_plane.runtime.capability_need import (
+            LLMCapabilityNeedExtractor,
+            command_completer,
+        )
+
+        report = evaluate_capability_facet_retrieval(
+            stage_cases,
+            bm25=bm25,
+            dense=dense,
+            old_extractor=LLMCapabilityNeedExtractor(
+                command_completer(args.old_rewrite_command)
+            ),
+            facet_extractor=LLMCapabilityFacetExtractor(
+                command_completer(args.capability_facets_command)
+            ),
+            per_query_k=args.per_query_k,
+            rrf_k=args.rrf_k,
+            cutoffs=(5, 10),
+        )
+
+        if args.as_json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print_capability_facet_report(report)
         return 0
 
     if args.command == "eval" and args.eval_command == "control-plane":
