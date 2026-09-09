@@ -20,7 +20,14 @@ from skill_control_plane.evals import (
     print_capability_facet_report,
 )
 from skill_control_plane.registry import load_skill_tree
-from skill_control_plane.retrieval import BM25Retriever, DEFAULT_DENSE_MODEL, DenseRetriever
+from skill_control_plane.retrieval import (
+    BM25Retriever,
+    DEFAULT_BIGMODEL_EMBEDDING_DIMENSIONS,
+    DEFAULT_BIGMODEL_EMBEDDING_MODEL,
+    DEFAULT_DENSE_MODEL,
+    BigModelDenseRetriever,
+    DenseRetriever,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -146,6 +153,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Corpus manifest whose snapshot_id the Gold set references",
     )
     capability_facets.add_argument("--dense-model", default=DEFAULT_DENSE_MODEL)
+    capability_facets.add_argument(
+        "--dense-backend",
+        choices=("sentence-transformers", "bigmodel"),
+        default="sentence-transformers",
+        help="Dense embedding backend; BM25 stays unchanged",
+    )
+    capability_facets.add_argument(
+        "--bigmodel-embedding-model",
+        default=DEFAULT_BIGMODEL_EMBEDDING_MODEL,
+    )
+    capability_facets.add_argument(
+        "--bigmodel-embedding-dimensions",
+        type=int,
+        choices=(256, 512, 1024, 2048),
+        default=DEFAULT_BIGMODEL_EMBEDDING_DIMENSIONS,
+    )
     capability_facets.add_argument(
         "--old-rewrite-command",
         required=True,
@@ -647,7 +670,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "eval" and args.eval_command == "capability-facets":
         stage_cases = load_stage_transition_gold(args.gold)
         _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
-        bm25, dense = _build_retrievers(args.root, args.dense_model)
+        if args.dense_backend == "bigmodel":
+            skills = load_skill_tree(args.root)
+            metadata_skills = [replace(skill, body="") for skill in skills]
+            bm25 = BM25Retriever(metadata_skills)
+            dense = BigModelDenseRetriever(
+                skills,
+                model_name=args.bigmodel_embedding_model,
+                dimensions=args.bigmodel_embedding_dimensions,
+            )
+        else:
+            bm25, dense = _build_retrievers(args.root, args.dense_model)
 
         from skill_control_plane.runtime.capability_facets import (
             LLMCapabilityFacetExtractor,
