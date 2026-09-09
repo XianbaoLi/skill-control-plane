@@ -1,4 +1,8 @@
 from .bundles import evaluate_bundle_trajectory, evaluate_stage_bundle_cases
+from .capability_facets import (
+    evaluate_capability_facet_retrieval,
+    print_capability_facet_report,
+)
 from .control_plane import (
     MultiSkillGoldCase,
     StageGold,
@@ -25,6 +29,7 @@ __all__ = [
     "StageTransitionGoldCase",
     "diagnose_stage_retrieval",
     "evaluate_bundle_trajectory",
+    "evaluate_capability_facet_retrieval",
     "evaluate_stage_bundle_cases",
     "evaluate_control_plane",
     "evaluate_stage_reroute",
@@ -33,6 +38,7 @@ __all__ = [
     "load_multi_skill_gold",
     "load_runtime_retrieval_gold",
     "load_stage_transition_gold",
+    "print_capability_facet_report",
     "required_recall_at_k",
     "stage_retrieval_query",
     "summarize_retrieval_escalation",
