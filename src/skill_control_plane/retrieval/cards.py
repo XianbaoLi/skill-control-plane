@@ -10,6 +10,7 @@ from skill_control_plane.models import SkillRecord
 TextCompleter = Callable[[str], str]
 
 RETRIEVAL_CARD_VERSION = "retrieval-card-v0.1"
+RETRIEVAL_CARD_FIELDS = ("purpose", "use_when", "capabilities", "lexical_cues")
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,15 +23,33 @@ class RetrievalCard:
     lexical_cues: tuple[str, ...]
     version: str = RETRIEVAL_CARD_VERSION
 
-    def augmentation_text(self) -> str:
-        """LLM-derived fields appended to the legacy metadata representation."""
-        sections = [
-            f"purpose: {self.purpose}",
-            "use when: " + "; ".join(self.use_when),
-            "capabilities: " + "; ".join(self.capabilities),
-            "lexical cues: " + "; ".join(self.lexical_cues),
-        ]
-        return "\n".join(section for section in sections if section.strip())
+    def augmentation_text(
+        self,
+        include_fields: Iterable[str] | None = None,
+    ) -> str:
+        """Render selected LLM-derived fields for retrieval ablations.
+
+        include_fields=None preserves the complete RetrievalCard v0.1 text.
+        Passing a subset enables leave-one-field-out experiments without changing
+        the legacy metadata portion of the Skill representation.
+        """
+        selected = set(
+            RETRIEVAL_CARD_FIELDS if include_fields is None else include_fields
+        )
+        unknown = selected - set(RETRIEVAL_CARD_FIELDS)
+        if unknown:
+            raise ValueError(f"unknown retrieval-card fields: {sorted(unknown)}")
+
+        sections: list[str] = []
+        if "purpose" in selected and self.purpose:
+            sections.append(f"purpose: {self.purpose}")
+        if "use_when" in selected and self.use_when:
+            sections.append("use when: " + "; ".join(self.use_when))
+        if "capabilities" in selected and self.capabilities:
+            sections.append("capabilities: " + "; ".join(self.capabilities))
+        if "lexical_cues" in selected and self.lexical_cues:
+            sections.append("lexical cues: " + "; ".join(self.lexical_cues))
+        return "\n".join(sections)
 
     def search_text(self, skill: SkillRecord) -> str:
         """Exact retrieval text: legacy metadata once, then card augmentation."""
@@ -176,8 +195,14 @@ def load_retrieval_cards(path: str | Path) -> dict[str, RetrievalCard]:
 def apply_retrieval_cards(
     skills: Iterable[SkillRecord],
     cards: dict[str, RetrievalCard],
+    *,
+    include_fields: Iterable[str] | None = None,
 ) -> list[SkillRecord]:
-    """Project validated cards into SkillRecord metadata for existing retrievers."""
+    """Project validated cards into SkillRecord metadata for existing retrievers.
+
+    include_fields is intentionally explicit so evaluation code can remove one
+    card field while holding the underlying Skill metadata fixed.
+    """
     skill_list = list(skills)
     validate_retrieval_cards(skill_list, cards)
     return [
@@ -187,7 +212,7 @@ def apply_retrieval_cards(
                 part
                 for part in (
                     skill.description,
-                    cards[skill.skill_id].augmentation_text(),
+                    cards[skill.skill_id].augmentation_text(include_fields),
                 )
                 if part
             ),
