@@ -10,10 +10,15 @@ from pathlib import Path
 
 from skill_control_plane.corpus import write_corpus_manifest
 from skill_control_plane.evals import (
+    LLMQueryParaphraser,
+    RETRIEVAL_CARD_FIELD_ABLATIONS,
+    build_query_variant_cache,
+    compare_query_robustness_reports,
     diagnose_stage_retrieval,
     evaluate_capability_facet_retrieval,
     evaluate_control_plane,
     evaluate_frozen_query_retrieval_ablation,
+    evaluate_query_variant_retrieval,
     evaluate_stage_bundle_cases,
     evaluate_stage_reroute,
     evaluate_union_retrieval,
@@ -21,7 +26,11 @@ from skill_control_plane.evals import (
     load_runtime_retrieval_gold,
     load_stage_transition_gold,
     print_capability_facet_report,
+    print_field_ablation_summary,
     print_frozen_query_retrieval_ablation,
+    print_query_robustness_comparison,
+    require_min_target_transitions,
+    summarize_field_ablation_reports,
 )
 from skill_control_plane.registry import load_skill_tree
 from skill_control_plane.retrieval import (
@@ -32,6 +41,7 @@ from skill_control_plane.retrieval import (
     BigModelDenseRetriever,
     DenseRetriever,
     LLMRetrievalCardExtractor,
+    RETRIEVAL_CARD_FIELDS,
     RETRIEVAL_CARD_VERSION,
     apply_retrieval_cards,
     build_retrieval_card_cache,
