@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -139,6 +139,24 @@ def load_retrieval_cards(path: str | Path) -> dict[str, RetrievalCard]:
             raise ValueError(f"duplicate retrieval card for {card.skill_id}")
         cards[card.skill_id] = card
     return cards
+
+
+def apply_retrieval_cards(
+    skills: Iterable[SkillRecord],
+    cards: dict[str, RetrievalCard],
+) -> list[SkillRecord]:
+    """Project validated cards into SkillRecord metadata for existing retrievers."""
+    skill_list = list(skills)
+    validate_retrieval_cards(skill_list, cards)
+    return [
+        replace(
+            skill,
+            description=cards[skill.skill_id].search_text(skill),
+            tags=(),
+            body="",
+        )
+        for skill in skill_list
+    ]
 
 
 def validate_retrieval_cards(
