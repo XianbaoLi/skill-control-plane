@@ -61,19 +61,44 @@ only after candidate selection.
 
 ## Build cards
 
+RetrievalCard extraction calls ZAI/BigModel directly. Hermes is not part of this
+offline indexing path.
+
+Expected environment:
+
+```bash
+BIGMODEL_API_KEY=...
+BIGMODEL_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+BIGMODEL_CHAT_MODEL=glm-5.2
+```
+
+First run a one-call provider smoke test:
+
 ```bash
 cd ~/workspace/skill-control-plane
-git switch feature/retrieval-card-v0.1
-git pull
-python -m pip install -e ".[dev]"
+set -a
+source .env
+set +a
 
+printf '%s' 'Return ONLY this JSON object: {"status":"ok"}' \
+  | python scripts/retrieval_card_bigmodel.py \
+      --model "$BIGMODEL_CHAT_MODEL"
+```
+
+Then build all cards:
+
+```bash
 mkdir -p local_artifacts/v0.5/retrieval-card-audits
 
 skill-control-plane corpus retrieval-cards \
   /mnt/d/Hermes/skills \
   --output local_artifacts/v0.5/retrieval-cards-v0.1.jsonl \
-  --extract-command "python scripts/hermes_oneshot_adapter.py --audit-dir local_artifacts/v0.5/retrieval-card-audits"
+  --extract-command "python scripts/retrieval_card_bigmodel.py --model glm-5.2 --temperature 0.1 --max-tokens 1200 --audit-dir local_artifacts/v0.5/retrieval-card-audits"
 ```
+
+The direct adapter uses the OpenAI-compatible BigModel `/chat/completions`
+endpoint, validates the returned content as exactly one JSON object, and writes only
+canonical JSON to stdout. API keys are never written to audit files.
 
 The extraction cache checkpoints after every successful Skill and reuses cards whose
 source `content_hash` still matches.
@@ -81,7 +106,8 @@ source `content_hash` still matches.
 ## Run tests
 
 ```bash
-pytest -q tests/test_retrieval_cards.py \
+pytest -q tests/test_bigmodel_chat.py \
+          tests/test_retrieval_cards.py \
           tests/test_stage_gold_audit.py \
           tests/test_retrieval_ablation.py
 ```
