@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from skill_control_plane.cli import _build_parser
 from skill_control_plane.evals.control_plane import StageGold, StageTransitionGoldCase
 from skill_control_plane.evals.query_robustness import (
     LLMQueryParaphraser,
@@ -150,3 +151,48 @@ def test_query_robustness_reports_recall_and_all_variant_stability():
     assert report["dense"]["recall_at_10"] == 1
     assert report["dense"]["all_variants_hit_at_10"] == 1
     assert report["query_variant_count"] == 3
+
+
+def test_explainability_cli_defaults_enforce_real_sample_size():
+    field_args = _build_parser().parse_args(
+        [
+            "eval",
+            "retrieval-field-ablation",
+            "/skills",
+            "--gold",
+            "gold.jsonl",
+            "--manifest",
+            "manifest.json",
+            "--old-rewrite-command",
+            "replay-old",
+            "--retrieval-cards",
+            "cards.jsonl",
+        ]
+    )
+    assert field_args.min_target_transitions == 20
+    assert field_args.allow_small_sample is False
+    assert field_args.per_retriever_k == 10
+    assert field_args.rrf_k == 60
+
+    robustness_args = _build_parser().parse_args(
+        [
+            "eval",
+            "retrieval-robustness",
+            "/skills",
+            "--gold",
+            "gold.jsonl",
+            "--manifest",
+            "manifest.json",
+            "--old-rewrite-command",
+            "replay-old",
+            "--paraphrase-command",
+            "paraphrase",
+            "--query-variants",
+            "queries.jsonl",
+            "--retrieval-cards",
+            "cards.jsonl",
+        ]
+    )
+    assert robustness_args.paraphrases_per_query == 4
+    assert robustness_args.min_target_transitions == 20
+    assert robustness_args.allow_small_sample is False
