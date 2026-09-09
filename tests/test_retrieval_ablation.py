@@ -80,6 +80,8 @@ def test_frozen_query_ablation_separates_union_and_ranked_budget():
     assert report["stages"][0]["dense"]["new_required_ranks"]["target-skill"] == 6
     assert report["stages"][0]["bm25"]["new_required_ranks"]["target-skill"] == 6
     assert report["stages"][0]["rrf"]["new_required_ranks"]["target-skill"] == 1
+    assert report["skill_representation"] == "metadata-v0.1"
+    assert report["target_transition_count"] == 1
 
 
 def test_retrieval_ablation_cli_defaults_match_v04_experiment():
@@ -102,3 +104,5 @@ def test_retrieval_ablation_cli_defaults_match_v04_experiment():
     assert args.bigmodel_embedding_model == "embedding-3"
     assert args.bigmodel_embedding_dimensions == 2048
     assert args.old_rewrite_command == "replay-old"
+    assert args.skill_representation == "metadata"
+    assert args.retrieval_cards is None
