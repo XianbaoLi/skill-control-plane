@@ -66,7 +66,7 @@ def _clean_list(
     if len(cleaned) < min_items:
         raise ValueError(f"{field} must contain at least {min_items} items")
     if max_items is not None and len(cleaned) > max_items:
-        raise ValueError(f"{field} must contain at most {max_items} items")
+        cleaned = cleaned[:max_items]
     return tuple(cleaned)
 
 
