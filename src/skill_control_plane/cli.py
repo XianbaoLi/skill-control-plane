@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -161,13 +162,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     capability_facets.add_argument(
         "--bigmodel-embedding-model",
-        default=DEFAULT_BIGMODEL_EMBEDDING_MODEL,
+        default=os.environ.get(
+            "BIGMODEL_EMBEDDING_MODEL", DEFAULT_BIGMODEL_EMBEDDING_MODEL
+        ),
     )
     capability_facets.add_argument(
         "--bigmodel-embedding-dimensions",
         type=int,
         choices=(256, 512, 1024, 2048),
-        default=DEFAULT_BIGMODEL_EMBEDDING_DIMENSIONS,
+        default=int(
+            os.environ.get(
+                "BIGMODEL_EMBEDDING_DIMENSIONS",
+                str(DEFAULT_BIGMODEL_EMBEDDING_DIMENSIONS),
+            )
+        ),
     )
     capability_facets.add_argument(
         "--old-rewrite-command",
