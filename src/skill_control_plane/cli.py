@@ -8,12 +8,17 @@ from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
-from skill_control_plane.corpus import write_corpus_manifest
+from skill_control_plane.corpus import build_corpus_manifest, write_corpus_manifest
 from skill_control_plane.evals import (
+    LLMQueryParaphraser,
+    RETRIEVAL_CARD_FIELD_ABLATIONS,
+    build_query_variant_cache,
+    compare_query_robustness_reports,
     diagnose_stage_retrieval,
     evaluate_capability_facet_retrieval,
     evaluate_control_plane,
     evaluate_frozen_query_retrieval_ablation,
+    evaluate_query_variant_retrieval,
     evaluate_stage_bundle_cases,
     evaluate_stage_reroute,
     evaluate_union_retrieval,
@@ -21,7 +26,11 @@ from skill_control_plane.evals import (
     load_runtime_retrieval_gold,
     load_stage_transition_gold,
     print_capability_facet_report,
+    print_field_ablation_summary,
     print_frozen_query_retrieval_ablation,
+    print_query_robustness_comparison,
+    require_min_target_transitions,
+    summarize_field_ablation_reports,
 )
 from skill_control_plane.registry import load_skill_tree
 from skill_control_plane.retrieval import (
@@ -32,6 +41,7 @@ from skill_control_plane.retrieval import (
     BigModelDenseRetriever,
     DenseRetriever,
     LLMRetrievalCardExtractor,
+    RETRIEVAL_CARD_FIELDS,
     RETRIEVAL_CARD_VERSION,
     apply_retrieval_cards,
     build_retrieval_card_cache,
@@ -274,6 +284,128 @@ def _build_parser() -> argparse.ArgumentParser:
     retrieval_ablation.add_argument("--rrf-k", type=int, default=60)
     retrieval_ablation.add_argument("--json", action="store_true", dest="as_json")
 
+    field_ablation = eval_subparsers.add_parser(
+        "retrieval-field-ablation",
+        help="Leave-one-field-out ablation for RetrievalCard v0.1",
+    )
+    field_ablation.add_argument("root", help="Local Skill tree")
+    field_ablation.add_argument("--gold", required=True)
+    field_ablation.add_argument("--manifest", required=True)
+    field_ablation.add_argument("--dense-model", default=DEFAULT_DENSE_MODEL)
+    field_ablation.add_argument(
+        "--dense-backend",
+        choices=("sentence-transformers", "bigmodel"),
+        default="sentence-transformers",
+    )
+    field_ablation.add_argument(
+        "--bigmodel-embedding-model",
+        default=os.environ.get(
+            "BIGMODEL_EMBEDDING_MODEL", DEFAULT_BIGMODEL_EMBEDDING_MODEL
+        ),
+    )
+    field_ablation.add_argument(
+        "--bigmodel-embedding-dimensions",
+        type=int,
+        choices=(256, 512, 1024, 2048),
+        default=int(
+            os.environ.get(
+                "BIGMODEL_EMBEDDING_DIMENSIONS",
+                str(DEFAULT_BIGMODEL_EMBEDDING_DIMENSIONS),
+            )
+        ),
+    )
+    field_ablation.add_argument(
+        "--old-rewrite-command",
+        required=True,
+        help="Frozen capability_need replay command",
+    )
+    field_ablation.add_argument(
+        "--retrieval-cards",
+        required=True,
+        help="RetrievalCard v0.1 JSONL",
+    )
+    field_ablation.add_argument("--per-retriever-k", type=int, default=10)
+    field_ablation.add_argument("--rrf-k", type=int, default=60)
+    field_ablation.add_argument(
+        "--min-target-transitions",
+        type=int,
+        default=20,
+        help="Minimum target Stage transitions required for explanatory results",
+    )
+    field_ablation.add_argument(
+        "--allow-small-sample",
+        action="store_true",
+        help="Allow fewer target transitions for smoke testing only",
+    )
+    field_ablation.add_argument("--json", action="store_true", dest="as_json")
+
+    robustness = eval_subparsers.add_parser(
+        "retrieval-robustness",
+        help="Compare metadata and RetrievalCard under frozen paraphrase queries",
+    )
+    robustness.add_argument("root", help="Local Skill tree")
+    robustness.add_argument("--gold", required=True)
+    robustness.add_argument("--manifest", required=True)
+    robustness.add_argument("--dense-model", default=DEFAULT_DENSE_MODEL)
+    robustness.add_argument(
+        "--dense-backend",
+        choices=("sentence-transformers", "bigmodel"),
+        default="sentence-transformers",
+    )
+    robustness.add_argument(
+        "--bigmodel-embedding-model",
+        default=os.environ.get(
+            "BIGMODEL_EMBEDDING_MODEL", DEFAULT_BIGMODEL_EMBEDDING_MODEL
+        ),
+    )
+    robustness.add_argument(
+        "--bigmodel-embedding-dimensions",
+        type=int,
+        choices=(256, 512, 1024, 2048),
+        default=int(
+            os.environ.get(
+                "BIGMODEL_EMBEDDING_DIMENSIONS",
+                str(DEFAULT_BIGMODEL_EMBEDDING_DIMENSIONS),
+            )
+        ),
+    )
+    robustness.add_argument(
+        "--old-rewrite-command",
+        required=True,
+        help="Frozen capability_need replay command",
+    )
+    robustness.add_argument(
+        "--paraphrase-command",
+        required=True,
+        help="Completion command used only to freeze query paraphrases",
+    )
+    robustness.add_argument(
+        "--query-variants",
+        required=True,
+        help="JSONL cache for original query + paraphrases per target transition",
+    )
+    robustness.add_argument(
+        "--retrieval-cards",
+        required=True,
+        help="RetrievalCard v0.1 JSONL",
+    )
+    robustness.add_argument("--paraphrases-per-query", type=int, default=4)
+    robustness.add_argument("--force-paraphrases", action="store_true")
+    robustness.add_argument("--per-retriever-k", type=int, default=10)
+    robustness.add_argument("--rrf-k", type=int, default=60)
+    robustness.add_argument(
+        "--min-target-transitions",
+        type=int,
+        default=20,
+        help="Minimum target Stage transitions required for explanatory results",
+    )
+    robustness.add_argument(
+        "--allow-small-sample",
+        action="store_true",
+        help="Allow fewer target transitions for smoke testing only",
+    )
+    robustness.add_argument("--json", action="store_true", dest="as_json")
+
     control_plane = eval_subparsers.add_parser(
         "control-plane",
         help="Evaluate multi-Skill coverage and stage rerouting",
@@ -322,6 +454,19 @@ def _validate_snapshot_id(gold_snapshot: str, manifest_path: str) -> None:
         )
 
 
+def _validate_root_snapshot(root: str, manifest_path: str) -> None:
+    manifest_snapshot = _manifest_snapshot_id(manifest_path)
+    actual_snapshot = str(
+        build_corpus_manifest(root, source="runtime-validation").get("snapshot_id", "")
+    )
+    if actual_snapshot != manifest_snapshot:
+        raise ValueError(
+            "Skill root/manifest snapshot mismatch: "
+            f"root={actual_snapshot}, manifest={manifest_snapshot}. "
+            "Use the frozen Skill corpus that produced this manifest."
+        )
+
+
 def _validate_snapshot(gold_path: str, manifest_path: str) -> None:
     cases = load_runtime_retrieval_gold(gold_path)
     _validate_snapshot_id(cases[0].snapshot_id, manifest_path)
@@ -334,6 +479,19 @@ def _build_retrievers(root: str, dense_model: str) -> tuple[BM25Retriever, Dense
         BM25Retriever(metadata_skills),
         DenseRetriever(skills, model_name=dense_model),
     )
+
+
+def _build_indexed_retrievers(indexed_skills, args):
+    bm25 = BM25Retriever(indexed_skills)
+    if args.dense_backend == "bigmodel":
+        dense = BigModelDenseRetriever(
+            indexed_skills,
+            model_name=args.bigmodel_embedding_model,
+            dimensions=args.bigmodel_embedding_dimensions,
+        )
+    else:
+        dense = DenseRetriever(indexed_skills, model_name=args.dense_model)
+    return bm25, dense
 
 
 def _print_retrieval_report(report: dict[str, object]) -> None:
@@ -847,6 +1005,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "eval" and args.eval_command == "retrieval-ablation":
         stage_cases = load_stage_transition_gold(args.gold)
         _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
+        _validate_root_snapshot(args.root, args.manifest)
 
         skills = load_skill_tree(args.root)
         if args.skill_representation == "retrieval-card":
@@ -893,6 +1052,157 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
             print_frozen_query_retrieval_ablation(report)
+        return 0
+
+    if args.command == "eval" and args.eval_command == "retrieval-field-ablation":
+        stage_cases = load_stage_transition_gold(args.gold)
+        _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
+        _validate_root_snapshot(args.root, args.manifest)
+        require_min_target_transitions(
+            stage_cases,
+            minimum=args.min_target_transitions,
+            allow_small_sample=args.allow_small_sample,
+        )
+
+        from skill_control_plane.runtime.capability_need import (
+            LLMCapabilityNeedExtractor,
+            command_completer,
+        )
+
+        skills = load_skill_tree(args.root)
+        cards = load_retrieval_cards(args.retrieval_cards)
+        old_extractor = LLMCapabilityNeedExtractor(
+            command_completer(args.old_rewrite_command)
+        )
+
+        reports = {}
+        metadata_skills = [replace(skill, body="") for skill in skills]
+        bm25, dense = _build_indexed_retrievers(metadata_skills, args)
+        reports["metadata-v0.1"] = evaluate_frozen_query_retrieval_ablation(
+            stage_cases,
+            bm25=bm25,
+            dense=dense,
+            old_extractor=old_extractor,
+            per_retriever_k=args.per_retriever_k,
+            rrf_k=args.rrf_k,
+            cutoffs=(5, 10),
+            skill_representation="metadata-v0.1",
+        )
+
+        for label, include_fields in RETRIEVAL_CARD_FIELD_ABLATIONS:
+            indexed_skills = apply_retrieval_cards(
+                skills,
+                cards,
+                include_fields=include_fields,
+            )
+            bm25, dense = _build_indexed_retrievers(indexed_skills, args)
+            reports[label] = evaluate_frozen_query_retrieval_ablation(
+                stage_cases,
+                bm25=bm25,
+                dense=dense,
+                old_extractor=old_extractor,
+                per_retriever_k=args.per_retriever_k,
+                rrf_k=args.rrf_k,
+                cutoffs=(5, 10),
+                skill_representation=f"{RETRIEVAL_CARD_VERSION}/{label}",
+            )
+
+        summary = summarize_field_ablation_reports(reports)
+        if args.as_json:
+            print(
+                json.dumps(
+                    {"summary": summary, "reports": reports},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            print_field_ablation_summary(summary)
+        return 0
+
+    if args.command == "eval" and args.eval_command == "retrieval-robustness":
+        stage_cases = load_stage_transition_gold(args.gold)
+        _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
+        _validate_root_snapshot(args.root, args.manifest)
+        require_min_target_transitions(
+            stage_cases,
+            minimum=args.min_target_transitions,
+            allow_small_sample=args.allow_small_sample,
+        )
+
+        from skill_control_plane.evals.query_robustness import (
+            load_query_variant_sets,
+        )
+        from skill_control_plane.runtime.capability_need import (
+            LLMCapabilityNeedExtractor,
+            command_completer,
+        )
+
+        old_extractor = LLMCapabilityNeedExtractor(
+            command_completer(args.old_rewrite_command)
+        )
+        cache_stats = build_query_variant_cache(
+            stage_cases,
+            old_extractor=old_extractor,
+            paraphraser=LLMQueryParaphraser(
+                command_completer(args.paraphrase_command)
+            ),
+            output=args.query_variants,
+            paraphrase_count=args.paraphrases_per_query,
+            force=args.force_paraphrases,
+        )
+        query_sets = load_query_variant_sets(args.query_variants)
+
+        skills = load_skill_tree(args.root)
+        cards = load_retrieval_cards(args.retrieval_cards)
+
+        metadata_skills = [replace(skill, body="") for skill in skills]
+        metadata_bm25, metadata_dense = _build_indexed_retrievers(
+            metadata_skills, args
+        )
+        metadata_report = evaluate_query_variant_retrieval(
+            stage_cases,
+            query_sets=query_sets,
+            bm25=metadata_bm25,
+            dense=metadata_dense,
+            per_retriever_k=args.per_retriever_k,
+            rrf_k=args.rrf_k,
+            cutoffs=(5, 10),
+            skill_representation="metadata-v0.1",
+        )
+
+        card_skills = apply_retrieval_cards(skills, cards)
+        card_bm25, card_dense = _build_indexed_retrievers(card_skills, args)
+        card_report = evaluate_query_variant_retrieval(
+            stage_cases,
+            query_sets=query_sets,
+            bm25=card_bm25,
+            dense=card_dense,
+            per_retriever_k=args.per_retriever_k,
+            rrf_k=args.rrf_k,
+            cutoffs=(5, 10),
+            skill_representation=RETRIEVAL_CARD_VERSION,
+        )
+
+        comparison = compare_query_robustness_reports(
+            metadata_report,
+            card_report,
+        )
+        if args.as_json:
+            print(
+                json.dumps(
+                    {
+                        "query_variant_cache": cache_stats,
+                        "comparison": comparison,
+                        "metadata_report": metadata_report,
+                        "retrieval_card_report": card_report,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            print_query_robustness_comparison(comparison)
         return 0
 
     if args.command == "eval" and args.eval_command == "control-plane":
