@@ -38,6 +38,7 @@ class BigModelChatClient:
     model: str | None = None
     temperature: float = 0.1
     max_tokens: int = 1200
+    reasoning_effort: str = "none"
     timeout: float = 120.0
     urlopen_fn: UrlopenFn = urlopen
 
@@ -59,6 +60,10 @@ class BigModelChatClient:
             raise ValueError("temperature must be between 0 and 2")
         if self.max_tokens < 1:
             raise ValueError("max_tokens must be positive")
+        if self.reasoning_effort not in {
+            "max", "xhigh", "high", "medium", "low", "minimal", "none"
+        }:
+            raise ValueError("unsupported reasoning_effort")
 
     def __call__(self, prompt: str) -> str:
         if not prompt.strip():
@@ -80,6 +85,7 @@ class BigModelChatClient:
                 "stream": False,
                 "temperature": self.temperature,
                 "max_tokens": self.max_tokens,
+                "reasoning_effort": self.reasoning_effort,
             },
             ensure_ascii=False,
         ).encode("utf-8")
@@ -114,6 +120,17 @@ class BigModelChatClient:
             raise RuntimeError("BigModel chat response has no message")
         content = message.get("content")
         if not isinstance(content, str) or not content.strip():
-            raise RuntimeError("BigModel chat response has no text content")
+            finish_reason = choices[0].get("finish_reason")
+            reasoning = message.get("reasoning_content")
+            if not isinstance(reasoning, str):
+                reasoning = message.get("reasoning")
+            reasoning_chars = len(reasoning) if isinstance(reasoning, str) else 0
+            has_tool_calls = bool(message.get("tool_calls"))
+            raise RuntimeError(
+                "BigModel chat response has no text content "
+                f"(finish_reason={finish_reason!r}, "
+                f"reasoning_chars={reasoning_chars}, "
+                f"tool_calls={has_tool_calls})"
+            )
 
         return canonical_json_text(content)
