@@ -122,6 +122,8 @@ def _build_parser() -> argparse.ArgumentParser:
                               help="Compare global-only and known-Shelf-first retrieval")
     bundle_experiment.add_argument("--capability-need-ab", action="store_true",
                                    help="Compare hierarchical raw evidence vs capability need")
+    bundle_experiment.add_argument("--soft-bundle-ab", action="store_true", help="Compare hard routing and soft priors")
+    bundle_experiment.add_argument("--soft-bundle-repair-ab", action="store_true", help="Compare hard, soft and conditional repair")
     stage_bundle.add_argument("--capability-need-command",
                               help="Completion command: prompt on stdin, JSON on stdout (no shell)")
     stage_bundle.add_argument("--json", action="store_true", dest="as_json")
@@ -553,7 +555,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "eval" and args.eval_command == "stage-bundle":
         if args.capability_need_ab and not args.capability_need_command:
             raise ValueError("--capability-need-ab requires --capability-need-command")
-        if args.capability_need_command and not args.capability_need_ab:
+        if args.soft_bundle_repair_ab and not args.capability_need_command:
+            raise ValueError("--soft-bundle-repair-ab requires --capability-need-command")
+        if args.capability_need_command and not (args.capability_need_ab or args.soft_bundle_repair_ab):
             raise ValueError("--capability-need-command requires --capability-need-ab")
         stage_cases = load_stage_transition_gold(args.gold)
         _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
@@ -580,6 +584,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             extra = {"dense_factory": dense_factory_for(dense),
                      "extractor": LLMCapabilityNeedExtractor(
                          command_completer(args.capability_need_command))}
+        if args.soft_bundle_ab or args.soft_bundle_repair_ab:
+            from skill_control_plane.evals.soft_bundle import evaluate_soft_bundle_cases
+            from skill_control_plane.runtime.hierarchical import dense_factory_for
+            evaluator = evaluate_soft_bundle_cases
+            extra = {"dense_factory": dense_factory_for(dense)}
+            if args.soft_bundle_repair_ab:
+                from skill_control_plane.runtime.capability_need import LLMCapabilityNeedExtractor, command_completer
+                extra["extractor"] = LLMCapabilityNeedExtractor(command_completer(args.capability_need_command))
         report = evaluator(
             stage_cases,
             records,
@@ -591,7 +603,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             **extra,
         )
 
-        if args.as_json or args.hierarchical_ab:
+        if args.as_json or args.hierarchical_ab or args.soft_bundle_ab or args.soft_bundle_repair_ab:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         elif args.capability_need_ab:
             from skill_control_plane.evals.hierarchical import print_capability_need_report
