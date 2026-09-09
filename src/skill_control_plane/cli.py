@@ -284,6 +284,128 @@ def _build_parser() -> argparse.ArgumentParser:
     retrieval_ablation.add_argument("--rrf-k", type=int, default=60)
     retrieval_ablation.add_argument("--json", action="store_true", dest="as_json")
 
+    field_ablation = eval_subparsers.add_parser(
+        "retrieval-field-ablation",
+        help="Leave-one-field-out ablation for RetrievalCard v0.1",
+    )
+    field_ablation.add_argument("root", help="Local Skill tree")
+    field_ablation.add_argument("--gold", required=True)
+    field_ablation.add_argument("--manifest", required=True)
+    field_ablation.add_argument("--dense-model", default=DEFAULT_DENSE_MODEL)
+    field_ablation.add_argument(
+        "--dense-backend",
+        choices=("sentence-transformers", "bigmodel"),
+        default="sentence-transformers",
+    )
+    field_ablation.add_argument(
+        "--bigmodel-embedding-model",
+        default=os.environ.get(
+            "BIGMODEL_EMBEDDING_MODEL", DEFAULT_BIGMODEL_EMBEDDING_MODEL
+        ),
+    )
+    field_ablation.add_argument(
+        "--bigmodel-embedding-dimensions",
+        type=int,
+        choices=(256, 512, 1024, 2048),
+        default=int(
+            os.environ.get(
+                "BIGMODEL_EMBEDDING_DIMENSIONS",
+                str(DEFAULT_BIGMODEL_EMBEDDING_DIMENSIONS),
+            )
+        ),
+    )
+    field_ablation.add_argument(
+        "--old-rewrite-command",
+        required=True,
+        help="Frozen capability_need replay command",
+    )
+    field_ablation.add_argument(
+        "--retrieval-cards",
+        required=True,
+        help="RetrievalCard v0.1 JSONL",
+    )
+    field_ablation.add_argument("--per-retriever-k", type=int, default=10)
+    field_ablation.add_argument("--rrf-k", type=int, default=60)
+    field_ablation.add_argument(
+        "--min-target-transitions",
+        type=int,
+        default=20,
+        help="Minimum target Stage transitions required for explanatory results",
+    )
+    field_ablation.add_argument(
+        "--allow-small-sample",
+        action="store_true",
+        help="Allow fewer target transitions for smoke testing only",
+    )
+    field_ablation.add_argument("--json", action="store_true", dest="as_json")
+
+    robustness = eval_subparsers.add_parser(
+        "retrieval-robustness",
+        help="Compare metadata and RetrievalCard under frozen paraphrase queries",
+    )
+    robustness.add_argument("root", help="Local Skill tree")
+    robustness.add_argument("--gold", required=True)
+    robustness.add_argument("--manifest", required=True)
+    robustness.add_argument("--dense-model", default=DEFAULT_DENSE_MODEL)
+    robustness.add_argument(
+        "--dense-backend",
+        choices=("sentence-transformers", "bigmodel"),
+        default="sentence-transformers",
+    )
+    robustness.add_argument(
+        "--bigmodel-embedding-model",
+        default=os.environ.get(
+            "BIGMODEL_EMBEDDING_MODEL", DEFAULT_BIGMODEL_EMBEDDING_MODEL
+        ),
+    )
+    robustness.add_argument(
+        "--bigmodel-embedding-dimensions",
+        type=int,
+        choices=(256, 512, 1024, 2048),
+        default=int(
+            os.environ.get(
+                "BIGMODEL_EMBEDDING_DIMENSIONS",
+                str(DEFAULT_BIGMODEL_EMBEDDING_DIMENSIONS),
+            )
+        ),
+    )
+    robustness.add_argument(
+        "--old-rewrite-command",
+        required=True,
+        help="Frozen capability_need replay command",
+    )
+    robustness.add_argument(
+        "--paraphrase-command",
+        required=True,
+        help="Completion command used only to freeze query paraphrases",
+    )
+    robustness.add_argument(
+        "--query-variants",
+        required=True,
+        help="JSONL cache for original query + paraphrases per target transition",
+    )
+    robustness.add_argument(
+        "--retrieval-cards",
+        required=True,
+        help="RetrievalCard v0.1 JSONL",
+    )
+    robustness.add_argument("--paraphrases-per-query", type=int, default=4)
+    robustness.add_argument("--force-paraphrases", action="store_true")
+    robustness.add_argument("--per-retriever-k", type=int, default=10)
+    robustness.add_argument("--rrf-k", type=int, default=60)
+    robustness.add_argument(
+        "--min-target-transitions",
+        type=int,
+        default=20,
+        help="Minimum target Stage transitions required for explanatory results",
+    )
+    robustness.add_argument(
+        "--allow-small-sample",
+        action="store_true",
+        help="Allow fewer target transitions for smoke testing only",
+    )
+    robustness.add_argument("--json", action="store_true", dest="as_json")
+
     control_plane = eval_subparsers.add_parser(
         "control-plane",
         help="Evaluate multi-Skill coverage and stage rerouting",
