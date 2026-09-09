@@ -82,7 +82,7 @@ set +a
 
 printf '%s' 'Return ONLY this JSON object: {"status":"ok"}' \
   | python scripts/retrieval_card_bigmodel.py \
-      --model "$BIGMODEL_CHAT_MODEL" --reasoning-effort none
+      --model "$BIGMODEL_CHAT_MODEL" --reasoning-effort low
 ```
 
 Then build all cards:
@@ -93,12 +93,10 @@ mkdir -p local_artifacts/v0.5/retrieval-card-audits
 skill-control-plane corpus retrieval-cards \
   /mnt/d/Hermes/skills \
   --output local_artifacts/v0.5/retrieval-cards-v0.1.jsonl \
-  --extract-command "python scripts/retrieval_card_bigmodel.py --model glm-5.3-flash --temperature 0.1 --max-tokens 1200 --reasoning-effort none --audit-dir local_artifacts/v0.5/retrieval-card-audits"
+  --extract-command "python scripts/retrieval_card_bigmodel.py --model glm-5.3-flash --temperature 0.1 --max-tokens 4096 --reasoning-effort low --audit-dir local_artifacts/v0.5/retrieval-card-audits"
 ```
 
-The direct adapter uses the OpenAI-compatible BigModel `/chat/completions`
-endpoint, validates the returned content as exactly one JSON object, and writes only
-canonical JSON to stdout. API keys are never written to audit files.
+The direct adapter uses the OpenAI-compatible BigModel `/chat/completions` endpoint. For GLM-5.3-Flash it fixes `thinking.type=enabled`, `reasoning_effort=low`, and `do_sample=false`; `temperature` is therefore not sent. The adapter validates the returned content as exactly one JSON object and writes only canonical JSON to stdout. API keys are never written to audit files.
 
 The extraction cache checkpoints after every successful Skill and reuses cards whose
 source `content_hash` still matches.
