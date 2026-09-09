@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from skill_control_plane.cli import _build_parser
+from skill_control_plane.cli import _build_parser, _validate_root_snapshot
 from skill_control_plane.evals.control_plane import StageGold, StageTransitionGoldCase
 from skill_control_plane.evals.query_robustness import (
     LLMQueryParaphraser,
@@ -12,6 +12,7 @@ from skill_control_plane.evals.query_robustness import (
 from skill_control_plane.evals.representation_ablation import (
     require_min_target_transitions,
 )
+from skill_control_plane.corpus import write_corpus_manifest
 from skill_control_plane.models import RetrievalCandidate, SkillRecord
 from skill_control_plane.retrieval.cards import RetrievalCard, apply_retrieval_cards
 
@@ -196,3 +197,25 @@ def test_explainability_cli_defaults_enforce_real_sample_size():
     assert robustness_args.paraphrases_per_query == 4
     assert robustness_args.min_target_transitions == 20
     assert robustness_args.allow_small_sample is False
+
+
+
+def test_explainability_rejects_live_root_that_drifted_from_manifest(tmp_path):
+    root = tmp_path / "skills"
+    skill_dir = root / "one"
+    skill_dir.mkdir(parents=True)
+    skill_file = skill_dir / "SKILL.md"
+    skill_file.write_text(
+        "---\nname: one\ndescription: first\n---\n\n# One\n",
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.json"
+    write_corpus_manifest(root, manifest, source="test")
+    _validate_root_snapshot(str(root), str(manifest))
+
+    skill_file.write_text(
+        "---\nname: one\ndescription: changed\n---\n\n# One\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Skill root/manifest snapshot mismatch"):
+        _validate_root_snapshot(str(root), str(manifest))
