@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -294,6 +295,17 @@ def _build_parser() -> argparse.ArgumentParser:
     control_plane.add_argument("--json", action="store_true", dest="as_json")
 
     return parser
+
+
+def _redact_child_stderr(stderr: str | None) -> str:
+    detail = (stderr or "").strip()
+    if not detail:
+        return "(child process produced no stderr)"
+    for name, value in os.environ.items():
+        upper = name.upper()
+        if value and any(token in upper for token in ("API_KEY", "TOKEN", "SECRET")):
+            detail = detail.replace(value, "<redacted>")
+    return detail[-4000:]
 
 
 def _manifest_snapshot_id(manifest_path: str) -> str:
@@ -644,14 +656,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         from skill_control_plane.runtime.capability_need import command_completer
 
         skills = load_skill_tree(args.root)
-        stats = build_retrieval_card_cache(
-            skills,
-            extractor=LLMRetrievalCardExtractor(
-                command_completer(args.extract_command)
-            ),
-            output=args.output,
-            force=args.force,
-        )
+        try:
+            stats = build_retrieval_card_cache(
+                skills,
+                extractor=LLMRetrievalCardExtractor(
+                    command_completer(args.extract_command)
+                ),
+                output=args.output,
+                force=args.force,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                "RetrievalCard extractor command failed "
+                f"(exit={exc.returncode}):\n{_redact_child_stderr(exc.stderr)}"
+            ) from exc
         print(
             json.dumps(
                 {
