@@ -22,16 +22,23 @@ class RetrievalCard:
     lexical_cues: tuple[str, ...]
     version: str = RETRIEVAL_CARD_VERSION
 
-    def search_text(self, skill: SkillRecord) -> str:
-        """Compact retrieval representation; full Skill body stays out of the index."""
+    def augmentation_text(self) -> str:
+        """LLM-derived fields appended to the legacy metadata representation."""
         sections = [
-            skill.name,
-            skill.description,
-            " ".join(skill.tags),
             f"purpose: {self.purpose}",
             "use when: " + "; ".join(self.use_when),
             "capabilities: " + "; ".join(self.capabilities),
             "lexical cues: " + "; ".join(self.lexical_cues),
+        ]
+        return "\n".join(section for section in sections if section.strip())
+
+    def search_text(self, skill: SkillRecord) -> str:
+        """Exact retrieval text: legacy metadata once, then card augmentation."""
+        sections = [
+            skill.name,
+            skill.description,
+            " ".join(skill.tags),
+            self.augmentation_text(),
         ]
         return "\n".join(section for section in sections if section.strip())
 
@@ -176,8 +183,14 @@ def apply_retrieval_cards(
     return [
         replace(
             skill,
-            description=cards[skill.skill_id].search_text(skill),
-            tags=(),
+            description="\n".join(
+                part
+                for part in (
+                    skill.description,
+                    cards[skill.skill_id].augmentation_text(),
+                )
+                if part
+            ),
             body="",
         )
         for skill in skill_list
