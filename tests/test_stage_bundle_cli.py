@@ -68,3 +68,10 @@ def test_stage_bundle_report_surfaces_shelf_metrics(capsys) -> None:
     assert "initial_shelf_future_bundle_recall: 1.0000 (1/1)" in output
     assert "shelf_reuse_rate: 0.5000" in output
     assert "active=['testing']" in output
+
+
+def test_hierarchical_ab_is_opt_in() -> None:
+    command = ['eval', 'stage-bundle', '/skills', '--gold', 'gold.jsonl',
+               '--manifest', 'manifest.json']
+    assert not _build_parser().parse_args(command).hierarchical_ab
+    assert _build_parser().parse_args(command + ['--hierarchical-ab']).hierarchical_ab

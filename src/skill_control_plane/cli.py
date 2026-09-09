@@ -117,6 +117,13 @@ def _build_parser() -> argparse.ArgumentParser:
     stage_bundle.add_argument("--k", type=int, default=5)
     stage_bundle.add_argument("--max-bundles", type=int, default=4)
     stage_bundle.add_argument("--max-skills-per-bundle", type=int, default=4)
+    bundle_experiment = stage_bundle.add_mutually_exclusive_group()
+    bundle_experiment.add_argument("--hierarchical-ab", action="store_true",
+                              help="Compare global-only and known-Shelf-first retrieval")
+    bundle_experiment.add_argument("--capability-need-ab", action="store_true",
+                                   help="Compare hierarchical raw evidence vs capability need")
+    stage_bundle.add_argument("--capability-need-command",
+                              help="Completion command: prompt on stdin, JSON on stdout (no shell)")
     stage_bundle.add_argument("--json", action="store_true", dest="as_json")
 
     control_plane = eval_subparsers.add_parser(
@@ -544,6 +551,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "eval" and args.eval_command == "stage-bundle":
+        if args.capability_need_ab and not args.capability_need_command:
+            raise ValueError("--capability-need-ab requires --capability-need-command")
+        if args.capability_need_command and not args.capability_need_ab:
+            raise ValueError("--capability-need-command requires --capability-need-ab")
         stage_cases = load_stage_transition_gold(args.gold)
         _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
         skills = load_skill_tree(args.root)
@@ -552,7 +563,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         bm25 = BM25Retriever(metadata_skills)
         dense = DenseRetriever(skills, model_name=args.dense_model)
 
-        report = evaluate_stage_bundle_cases(
+        evaluator = evaluate_stage_bundle_cases
+        extra = {}
+        if args.hierarchical_ab:
+            from skill_control_plane.evals.hierarchical import evaluate_hierarchical_cases
+            from skill_control_plane.runtime.hierarchical import dense_factory_for
+            evaluator = evaluate_hierarchical_cases
+            extra = {"dense_factory": dense_factory_for(dense)}
+        if args.capability_need_ab:
+            from skill_control_plane.evals.hierarchical import evaluate_capability_need_cases
+            from skill_control_plane.runtime.hierarchical import dense_factory_for
+            from skill_control_plane.runtime.capability_need import (
+                LLMCapabilityNeedExtractor, command_completer,
+            )
+            evaluator = evaluate_capability_need_cases
+            extra = {"dense_factory": dense_factory_for(dense),
+                     "extractor": LLMCapabilityNeedExtractor(
+                         command_completer(args.capability_need_command))}
+        report = evaluator(
             stage_cases,
             records,
             bm25=bm25,
@@ -560,10 +588,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             k=args.k,
             max_bundles=args.max_bundles,
             max_skills_per_bundle=args.max_skills_per_bundle,
+            **extra,
         )
 
-        if args.as_json:
+        if args.as_json or args.hierarchical_ab:
             print(json.dumps(report, ensure_ascii=False, indent=2))
+        elif args.capability_need_ab:
+            from skill_control_plane.evals.hierarchical import print_capability_need_report
+            print_capability_need_report(report)
         else:
             _print_stage_bundle_report(report)
         return 0
