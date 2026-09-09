@@ -204,6 +204,7 @@ def apply_retrieval_cards(
     card field while holding the underlying Skill metadata fixed.
     """
     skill_list = list(skills)
+    selected_fields = None if include_fields is None else tuple(include_fields)
     validate_retrieval_cards(skill_list, cards)
     return [
         replace(
@@ -212,7 +213,7 @@ def apply_retrieval_cards(
                 part
                 for part in (
                     skill.description,
-                    cards[skill.skill_id].augmentation_text(include_fields),
+                    cards[skill.skill_id].augmentation_text(selected_fields),
                 )
                 if part
             ),
