@@ -69,16 +69,21 @@ def evaluate_capability_facet_retrieval(
 
     cutoffs = tuple(sorted(set(cutoffs)))
     rows: list[dict[str, Any]] = []
-    required_occurrences = 0
+    new_required_occurrences = 0
+    required_now_occurrences = 0
     old_hits = {cutoff: 0 for cutoff in cutoffs}
     facet_hits = {cutoff: 0 for cutoff in cutoffs}
+    old_required_now_hits = {cutoff: 0 for cutoff in cutoffs}
+    facet_required_now_hits = {cutoff: 0 for cutoff in cutoffs}
     facet_ok = 0
     old_ok = 0
 
     for case in cases:
         for stage in case.stages[1:]:
-            required = tuple(stage.required_now)
-            required_occurrences += len(required)
+            required = tuple(stage.new_required)
+            required_now = tuple(stage.required_now)
+            new_required_occurrences += len(required)
+            required_now_occurrences += len(required_now)
 
             old = extract_query(
                 old_extractor,
@@ -94,6 +99,7 @@ def evaluate_capability_facet_retrieval(
                 rrf_k=rrf_k,
             )
             old_ranks = _required_ranks(required, old_ranking)
+            old_required_now_ranks = _required_ranks(required_now, old_ranking)
             old_ok += old.status == "ok"
 
             facets = extract_facet_queries(
@@ -109,6 +115,7 @@ def evaluate_capability_facet_retrieval(
                 rrf_k=rrf_k,
             )
             facet_ranks = _required_ranks(required, facet_ranking)
+            facet_required_now_ranks = _required_ranks(required_now, facet_ranking)
             facet_ok += facets.status == "ok"
 
             old_recall: dict[str, float] = {}
@@ -126,18 +133,28 @@ def evaluate_capability_facet_retrieval(
                     rank is not None and rank <= cutoff
                     for rank in facet_ranks.values()
                 )
+                old_required_now_hits[cutoff] += sum(
+                    rank is not None and rank <= cutoff
+                    for rank in old_required_now_ranks.values()
+                )
+                facet_required_now_hits[cutoff] += sum(
+                    rank is not None and rank <= cutoff
+                    for rank in facet_required_now_ranks.values()
+                )
 
             rows.append(
                 {
                     "case_id": case.case_id,
                     "stage_id": stage.stage_id,
                     "runtime_evidence": list(stage.runtime_evidence),
-                    "required": list(required),
+                    "new_required": list(required),
+                    "required_now": list(required_now),
                     "old": {
                         "query": old.query,
                         "status": old.status,
                         "confidence": old.need.confidence if old.need else None,
-                        "required_ranks": old_ranks,
+                        "new_required_ranks": old_ranks,
+                        "required_now_ranks": old_required_now_ranks,
                         "recall_at": old_recall,
                         "top10": [
                             candidate.skill_id for candidate in old_ranking[:10]
@@ -152,7 +169,8 @@ def evaluate_capability_facet_retrieval(
                         "evidence_basis": (
                             facets.facets.evidence_basis if facets.facets else ""
                         ),
-                        "required_ranks": facet_ranks,
+                        "new_required_ranks": facet_ranks,
+                        "required_now_ranks": facet_required_now_ranks,
                         "recall_at": facet_recall,
                         "top10": [
                             candidate.skill_id for candidate in facet_ranking[:10]
@@ -162,13 +180,22 @@ def evaluate_capability_facet_retrieval(
             )
 
     transition_count = len(rows)
-    denominator = required_occurrences or 1
+    denominator = new_required_occurrences or 1
+    required_now_denominator = required_now_occurrences or 1
     old_metrics = {
         f"recall_at_{cutoff}": old_hits[cutoff] / denominator
         for cutoff in cutoffs
     }
     facet_metrics = {
         f"recall_at_{cutoff}": facet_hits[cutoff] / denominator
+        for cutoff in cutoffs
+    }
+    old_required_now_metrics = {
+        f"recall_at_{cutoff}": old_required_now_hits[cutoff] / required_now_denominator
+        for cutoff in cutoffs
+    }
+    facet_required_now_metrics = {
+        f"recall_at_{cutoff}": facet_required_now_hits[cutoff] / required_now_denominator
         for cutoff in cutoffs
     }
 
@@ -182,9 +209,11 @@ def evaluate_capability_facet_retrieval(
             "both arms use identical BM25+Dense reciprocal-rank fusion; "
             "only query formulation differs"
         ),
-        "required_denominator": "required_now Skill occurrences across runtime transitions",
+        "primary_denominator": "new_required Skill occurrences across runtime transitions",
+        "secondary_denominator": "required_now Skill occurrences across runtime transitions",
         "transition_count": transition_count,
-        "required_skill_occurrences": required_occurrences,
+        "new_required_skill_occurrences": new_required_occurrences,
+        "required_now_skill_occurrences": required_now_occurrences,
         "per_query_k": per_query_k,
         "rrf_k": rrf_k,
         "cutoffs": list(cutoffs),
@@ -192,6 +221,14 @@ def evaluate_capability_facet_retrieval(
         "facet_extraction_ok_rate": facet_ok / transition_count if transition_count else 0.0,
         "old": old_metrics,
         "facets": facet_metrics,
+        "required_now_secondary": {
+            "old": old_required_now_metrics,
+            "facets": facet_required_now_metrics,
+            "delta": {
+                key: facet_required_now_metrics[key] - old_required_now_metrics[key]
+                for key in old_required_now_metrics
+            },
+        },
         "delta": {
             key: facet_metrics[key] - old_metrics[key]
             for key in old_metrics
@@ -204,7 +241,8 @@ def print_capability_facet_report(report: Mapping[str, Any]) -> None:
     print("=== CAPABILITY FACET RETRIEVAL V0.4 ===")
     print(report["comparison"])
     print(f"transitions: {report['transition_count']}")
-    print(f"required_skill_occurrences: {report['required_skill_occurrences']}")
+    print(f"new_required_skill_occurrences: {report['new_required_skill_occurrences']}")
+    print(f"required_now_skill_occurrences: {report['required_now_skill_occurrences']}")
     print(f"per_query_k: {report['per_query_k']}")
     print(f"rrf_k: {report['rrf_k']}")
     print(
@@ -231,8 +269,11 @@ def print_capability_facet_report(report: Mapping[str, Any]) -> None:
 
     for row in report["stages"]:
         print(f"\n{row['case_id']}/{row['stage_id']}")
-        print(f"  required: {row['required']}")
+        print(f"  new_required: {row['new_required']}")
+        print(f"  required_now: {row['required_now']}")
+        print(f"  old_status: {row['old']['status']}")
         print(f"  old_query: {row['old']['query']}")
-        print(f"  old_ranks: {row['old']['required_ranks']}")
+        print(f"  old_new_required_ranks: {row['old']['new_required_ranks']}")
+        print(f"  facet_status: {row['facets']['status']}")
         print(f"  facet_queries: {row['facets']['queries']}")
-        print(f"  facet_ranks: {row['facets']['required_ranks']}")
+        print(f"  facet_new_required_ranks: {row['facets']['new_required_ranks']}")
