@@ -34,11 +34,11 @@ def main() -> None:
         default=os.environ.get("BIGMODEL_BASE_URL", DEFAULT_BIGMODEL_BASE_URL),
     )
     parser.add_argument("--temperature", type=float, default=0.1)
-    parser.add_argument("--max-tokens", type=int, default=1200)
+    parser.add_argument("--max-tokens", type=int, default=4096)
     parser.add_argument(
         "--reasoning-effort",
         choices=("max", "xhigh", "high", "medium", "low", "minimal", "none"),
-        default="none",
+        default="low",
     )
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--audit-dir", type=Path)
