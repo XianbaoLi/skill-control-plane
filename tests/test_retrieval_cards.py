@@ -110,3 +110,32 @@ def test_stale_card_is_rejected(tmp_path):
 
     with pytest.raises(ValueError, match="stale"):
         validate_retrieval_cards([_skill("hash-2")], cards)
+
+
+def test_retrieval_card_extractor_truncates_overlong_lists():
+    skill = SkillRecord(
+        skill_id="debug-python",
+        name="Debug Python",
+        description="Debug Python execution.",
+        tags=("python", "debugging"),
+        category="development",
+        relative_path="debug-python/SKILL.md",
+        content_hash="abc123",
+        body="Use breakpoints and step through code when traceback inspection is insufficient.",
+    )
+
+    completion = json.dumps(
+        {
+            "purpose": "Debug Python execution.",
+            "use_when": [f"signal {i}" for i in range(10)],
+            "capabilities": [f"capability {i}" for i in range(10)],
+            "lexical_cues": [f"cue {i}" for i in range(20)],
+        }
+    )
+
+    card = LLMRetrievalCardExtractor(lambda _: completion).extract(skill)
+
+    assert len(card.use_when) == 8
+    assert len(card.capabilities) == 8
+    assert len(card.lexical_cues) == 15
+    assert card.lexical_cues[-1] == "cue 14"
