@@ -93,7 +93,7 @@ def test_cache_reuses_matching_content_hash_and_projects_to_metadata(tmp_path):
     cards = load_retrieval_cards(output)
     indexed = apply_retrieval_cards([skill], cards)
     assert indexed[0].body == ""
-    assert indexed[0].tags == ()
+    assert indexed[0].tags == skill.tags
     assert "use when:" in indexed[0].description
     assert "watch a collection mutate" in indexed[0].description
 
