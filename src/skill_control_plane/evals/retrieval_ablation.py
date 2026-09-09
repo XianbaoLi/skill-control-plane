@@ -53,6 +53,7 @@ def evaluate_frozen_query_retrieval_ablation(
     per_retriever_k: int = 10,
     rrf_k: int = 60,
     cutoffs: tuple[int, ...] = (5, 10),
+    skill_representation: str = "metadata-v0.1",
 ) -> dict[str, Any]:
     """Compare retrieval/fusion only while keeping the old query fixed.
 
@@ -86,11 +87,14 @@ def evaluate_frozen_query_retrieval_ablation(
     union_hits = 0
     union_pool_size = 0
     union_full_transition_count = 0
+    target_transition_count = 0
 
     for case in cases:
         for stage in case.stages[1:]:
             required = tuple(stage.new_required)
             required_occurrences += len(required)
+            if required:
+                target_transition_count += 1
 
             frozen = extract_query(
                 old_extractor,
@@ -131,7 +135,7 @@ def evaluate_frozen_query_retrieval_ablation(
             ]
             union_hits += len(union_required_hits)
             union_pool_size += len(union_ranking)
-            if len(union_required_hits) == len(required):
+            if required and len(union_required_hits) == len(required):
                 union_full_transition_count += 1
 
             rows.append(
@@ -153,7 +157,7 @@ def evaluate_frozen_query_retrieval_ablation(
                         "new_required_hits": union_required_hits,
                         "candidate_recall": (
                             len(union_required_hits) / len(required)
-                            if required else 1.0
+                            if required else None
                         ),
                     },
                     "rrf": rrf_arm,
@@ -174,7 +178,9 @@ def evaluate_frozen_query_retrieval_ablation(
         "comparison": "frozen old query: Dense vs BM25 vs Union vs RRF",
         "scope": "retrieval only; runtime transitions only; S1 excluded",
         "query_policy": "one identical old capability_need query per transition",
+        "skill_representation": skill_representation,
         "transition_count": transition_count,
+        "target_transition_count": target_transition_count,
         "new_required_skill_occurrences": required_occurrences,
         "per_retriever_k": per_retriever_k,
         "rrf_k": rrf_k,
@@ -191,8 +197,8 @@ def evaluate_frozen_query_retrieval_ablation(
             ),
             "max_candidate_budget": 2 * per_retriever_k,
             "full_transition_coverage": (
-                union_full_transition_count / transition_count
-                if transition_count else 0.0
+                union_full_transition_count / target_transition_count
+                if target_transition_count else 0.0
             ),
         },
         "rrf": ranked_metrics["rrf"],
@@ -206,7 +212,9 @@ def print_frozen_query_retrieval_ablation(report: Mapping[str, Any]) -> None:
     print("B = BM25 only")
     print("C = BM25@K union Dense@K")
     print("D = BM25@K + Dense@K RRF")
+    print(f"skill_representation: {report['skill_representation']}")
     print(f"transitions: {report['transition_count']}")
+    print(f"target_transitions: {report['target_transition_count']}")
     print(
         "new_required_skill_occurrences: "
         f"{report['new_required_skill_occurrences']}"
