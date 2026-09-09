@@ -40,7 +40,13 @@ class RetrievalCardExtractor(Protocol):
     def extract(self, skill: SkillRecord) -> RetrievalCard: ...
 
 
-def _clean_list(value: object, field: str) -> tuple[str, ...]:
+def _clean_list(
+    value: object,
+    field: str,
+    *,
+    min_items: int = 0,
+    max_items: int | None = None,
+) -> tuple[str, ...]:
     if not isinstance(value, list):
         raise ValueError(f"{field} must be a JSON array")
     cleaned: list[str] = []
@@ -50,6 +56,10 @@ def _clean_list(value: object, field: str) -> tuple[str, ...]:
         text = " ".join(item.split()).strip()
         if text and text not in cleaned:
             cleaned.append(text)
+    if len(cleaned) < min_items:
+        raise ValueError(f"{field} must contain at least {min_items} items")
+    if max_items is not None and len(cleaned) > max_items:
+        raise ValueError(f"{field} must contain at most {max_items} items")
     return tuple(cleaned)
 
 
@@ -107,9 +117,15 @@ class LLMRetrievalCardExtractor:
             skill_id=skill.skill_id,
             source_content_hash=skill.content_hash,
             purpose=purpose,
-            use_when=_clean_list(data["use_when"], "use_when"),
-            capabilities=_clean_list(data["capabilities"], "capabilities"),
-            lexical_cues=_clean_list(data["lexical_cues"], "lexical_cues"),
+            use_when=_clean_list(
+                data["use_when"], "use_when", min_items=2, max_items=8
+            ),
+            capabilities=_clean_list(
+                data["capabilities"], "capabilities", min_items=1, max_items=8
+            ),
+            lexical_cues=_clean_list(
+                data["lexical_cues"], "lexical_cues", min_items=3, max_items=15
+            ),
         )
 
 
@@ -121,13 +137,22 @@ def load_retrieval_cards(path: str | Path) -> dict[str, RetrievalCard]:
         if not raw.strip():
             continue
         data = json.loads(raw)
+        purpose = data.get("purpose")
+        if not isinstance(purpose, str) or not purpose.strip():
+            raise ValueError(f"retrieval card line {line_number} has invalid purpose")
         card = RetrievalCard(
             skill_id=str(data["skill_id"]),
             source_content_hash=str(data["source_content_hash"]),
-            purpose=str(data["purpose"]),
-            use_when=tuple(data.get("use_when", ())),
-            capabilities=tuple(data.get("capabilities", ())),
-            lexical_cues=tuple(data.get("lexical_cues", ())),
+            purpose=" ".join(purpose.split()).strip(),
+            use_when=_clean_list(
+                data.get("use_when"), "use_when", min_items=2, max_items=8
+            ),
+            capabilities=_clean_list(
+                data.get("capabilities"), "capabilities", min_items=1, max_items=8
+            ),
+            lexical_cues=_clean_list(
+                data.get("lexical_cues"), "lexical_cues", min_items=3, max_items=15
+            ),
             version=str(data.get("version", "")),
         )
         if card.version != RETRIEVAL_CARD_VERSION:
