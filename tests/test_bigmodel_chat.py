@@ -66,7 +66,7 @@ def test_bigmodel_chat_client_uses_openai_compatible_endpoint_and_returns_json()
         model="glm-test",
         temperature=0.1,
         max_tokens=900,
-        reasoning_effort="none",
+        reasoning_effort="low",
         timeout=12,
         urlopen_fn=fake_urlopen,
     )
@@ -75,10 +75,23 @@ def test_bigmodel_chat_client_uses_openai_compatible_endpoint_and_returns_json()
     assert captured["url"] == "https://example.test/v4/chat/completions"
     assert captured["timeout"] == 12
     assert captured["payload"]["model"] == "glm-test"
-    assert captured["payload"]["temperature"] == 0.1
     assert captured["payload"]["max_tokens"] == 900
-    assert captured["payload"]["reasoning_effort"] == "none"
+    assert captured["payload"]["reasoning_effort"] == "low"
+    assert captured["payload"]["thinking"] == {"type": "enabled"}
+    assert captured["payload"]["do_sample"] is False
+    assert "temperature" not in captured["payload"]
     assert captured["payload"]["stream"] is False
     assert captured["payload"]["messages"][-1]["content"] == "extract this skill"
     assert captured["headers"]["Authorization"] == "Bearer test-key"
     assert result["purpose"] == "debug Python"
+
+
+def test_glm_53_rejects_unsupported_reasoning_effort_locally():
+    with pytest.raises(ValueError, match="only: low, high, max"):
+        BigModelChatClient(
+            api_key="test-key",
+            base_url="https://example.test/v4",
+            model="glm-5.3-flash",
+            reasoning_effort="none",
+            urlopen_fn=lambda *args, **kwargs: None,
+        )
