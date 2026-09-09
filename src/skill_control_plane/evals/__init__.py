@@ -20,6 +20,10 @@ from .retrieval import (
     evaluate_union_retrieval,
     load_runtime_retrieval_gold,
 )
+from .retrieval_ablation import (
+    evaluate_frozen_query_retrieval_ablation,
+    print_frozen_query_retrieval_ablation,
+)
 from .stage_diagnostics import diagnose_stage_retrieval
 
 __all__ = [
@@ -32,6 +36,7 @@ __all__ = [
     "evaluate_capability_facet_retrieval",
     "evaluate_stage_bundle_cases",
     "evaluate_control_plane",
+    "evaluate_frozen_query_retrieval_ablation",
     "evaluate_stage_reroute",
     "evaluate_union_retrieval",
     "hard_negative_hit_rate",
@@ -39,6 +44,7 @@ __all__ = [
     "load_runtime_retrieval_gold",
     "load_stage_transition_gold",
     "print_capability_facet_report",
+    "print_frozen_query_retrieval_ablation",
     "required_recall_at_k",
     "stage_retrieval_query",
     "summarize_retrieval_escalation",
