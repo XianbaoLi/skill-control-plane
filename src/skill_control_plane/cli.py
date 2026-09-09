@@ -1040,6 +1040,155 @@ def main(argv: Sequence[str] | None = None) -> int:
             print_frozen_query_retrieval_ablation(report)
         return 0
 
+    if args.command == "eval" and args.eval_command == "retrieval-field-ablation":
+        stage_cases = load_stage_transition_gold(args.gold)
+        _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
+        require_min_target_transitions(
+            stage_cases,
+            minimum=args.min_target_transitions,
+            allow_small_sample=args.allow_small_sample,
+        )
+
+        from skill_control_plane.runtime.capability_need import (
+            LLMCapabilityNeedExtractor,
+            command_completer,
+        )
+
+        skills = load_skill_tree(args.root)
+        cards = load_retrieval_cards(args.retrieval_cards)
+        old_extractor = LLMCapabilityNeedExtractor(
+            command_completer(args.old_rewrite_command)
+        )
+
+        reports = {}
+        metadata_skills = [replace(skill, body="") for skill in skills]
+        bm25, dense = _build_indexed_retrievers(metadata_skills, args)
+        reports["metadata-v0.1"] = evaluate_frozen_query_retrieval_ablation(
+            stage_cases,
+            bm25=bm25,
+            dense=dense,
+            old_extractor=old_extractor,
+            per_retriever_k=args.per_retriever_k,
+            rrf_k=args.rrf_k,
+            cutoffs=(5, 10),
+            skill_representation="metadata-v0.1",
+        )
+
+        for label, include_fields in RETRIEVAL_CARD_FIELD_ABLATIONS:
+            indexed_skills = apply_retrieval_cards(
+                skills,
+                cards,
+                include_fields=include_fields,
+            )
+            bm25, dense = _build_indexed_retrievers(indexed_skills, args)
+            reports[label] = evaluate_frozen_query_retrieval_ablation(
+                stage_cases,
+                bm25=bm25,
+                dense=dense,
+                old_extractor=old_extractor,
+                per_retriever_k=args.per_retriever_k,
+                rrf_k=args.rrf_k,
+                cutoffs=(5, 10),
+                skill_representation=f"{RETRIEVAL_CARD_VERSION}/{label}",
+            )
+
+        summary = summarize_field_ablation_reports(reports)
+        if args.as_json:
+            print(
+                json.dumps(
+                    {"summary": summary, "reports": reports},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            print_field_ablation_summary(summary)
+        return 0
+
+    if args.command == "eval" and args.eval_command == "retrieval-robustness":
+        stage_cases = load_stage_transition_gold(args.gold)
+        _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
+        require_min_target_transitions(
+            stage_cases,
+            minimum=args.min_target_transitions,
+            allow_small_sample=args.allow_small_sample,
+        )
+
+        from skill_control_plane.evals.query_robustness import (
+            load_query_variant_sets,
+        )
+        from skill_control_plane.runtime.capability_need import (
+            LLMCapabilityNeedExtractor,
+            command_completer,
+        )
+
+        old_extractor = LLMCapabilityNeedExtractor(
+            command_completer(args.old_rewrite_command)
+        )
+        cache_stats = build_query_variant_cache(
+            stage_cases,
+            old_extractor=old_extractor,
+            paraphraser=LLMQueryParaphraser(
+                command_completer(args.paraphrase_command)
+            ),
+            output=args.query_variants,
+            paraphrase_count=args.paraphrases_per_query,
+            force=args.force_paraphrases,
+        )
+        query_sets = load_query_variant_sets(args.query_variants)
+
+        skills = load_skill_tree(args.root)
+        cards = load_retrieval_cards(args.retrieval_cards)
+
+        metadata_skills = [replace(skill, body="") for skill in skills]
+        metadata_bm25, metadata_dense = _build_indexed_retrievers(
+            metadata_skills, args
+        )
+        metadata_report = evaluate_query_variant_retrieval(
+            stage_cases,
+            query_sets=query_sets,
+            bm25=metadata_bm25,
+            dense=metadata_dense,
+            per_retriever_k=args.per_retriever_k,
+            rrf_k=args.rrf_k,
+            cutoffs=(5, 10),
+            skill_representation="metadata-v0.1",
+        )
+
+        card_skills = apply_retrieval_cards(skills, cards)
+        card_bm25, card_dense = _build_indexed_retrievers(card_skills, args)
+        card_report = evaluate_query_variant_retrieval(
+            stage_cases,
+            query_sets=query_sets,
+            bm25=card_bm25,
+            dense=card_dense,
+            per_retriever_k=args.per_retriever_k,
+            rrf_k=args.rrf_k,
+            cutoffs=(5, 10),
+            skill_representation=RETRIEVAL_CARD_VERSION,
+        )
+
+        comparison = compare_query_robustness_reports(
+            metadata_report,
+            card_report,
+        )
+        if args.as_json:
+            print(
+                json.dumps(
+                    {
+                        "query_variant_cache": cache_stats,
+                        "comparison": comparison,
+                        "metadata_report": metadata_report,
+                        "retrieval_card_report": card_report,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            print_query_robustness_comparison(comparison)
+        return 0
+
     if args.command == "eval" and args.eval_command == "control-plane":
         multi_cases = load_multi_skill_gold(args.multi_skill)
         stage_cases = load_stage_transition_gold(args.stage_transition)
