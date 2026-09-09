@@ -14,6 +14,7 @@ ignores user config and may change provider setup.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -48,6 +49,7 @@ def main() -> None:
     prompt = sys.stdin.read()
     if not prompt.strip():
         raise ValueError("Harness prompt on stdin must not be empty")
+    prompt_key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
 
     command = [args.hermes, "--ignore-rules"]
     if args.safe_mode:
@@ -74,7 +76,7 @@ def main() -> None:
         except subprocess.TimeoutExpired as exc:
             if args.audit_dir:
                 args.audit_dir.mkdir(parents=True, exist_ok=True)
-                (args.audit_dir / "last-timeout.json").write_text(
+                (args.audit_dir / f"{prompt_key}.timeout.json").write_text(
                     json.dumps(
                         {
                             "command": command[:-1] + ["<PROMPT>"],
@@ -105,7 +107,7 @@ def main() -> None:
                 "stderr": process.stderr,
                 "usage": usage,
             }
-            (args.audit_dir / "last-run.json").write_text(
+            (args.audit_dir / f"{prompt_key}.json").write_text(
                 json.dumps(audit, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
