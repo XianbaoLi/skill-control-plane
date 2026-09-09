@@ -37,8 +37,8 @@ class BigModelChatClient:
     base_url: str | None = None
     model: str | None = None
     temperature: float = 0.1
-    max_tokens: int = 1200
-    reasoning_effort: str = "none"
+    max_tokens: int = 4096
+    reasoning_effort: str = "low"
     timeout: float = 120.0
     urlopen_fn: UrlopenFn = urlopen
 
@@ -64,6 +64,13 @@ class BigModelChatClient:
             "max", "xhigh", "high", "medium", "low", "minimal", "none"
         }:
             raise ValueError("unsupported reasoning_effort")
+        model_lower = str(self.model).lower()
+        if model_lower in {"glm-5.3", "glm-5.3-flash"} and self.reasoning_effort not in {
+            "low", "high", "max"
+        }:
+            raise ValueError(
+                f"{self.model} supports reasoning_effort only: low, high, max"
+            )
 
     def __call__(self, prompt: str) -> str:
         if not prompt.strip():
@@ -83,9 +90,10 @@ class BigModelChatClient:
                     {"role": "user", "content": prompt},
                 ],
                 "stream": False,
-                "temperature": self.temperature,
-                "max_tokens": self.max_tokens,
+                "thinking": {"type": "enabled"},
                 "reasoning_effort": self.reasoning_effort,
+                "do_sample": False,
+                "max_tokens": self.max_tokens,
             },
             ensure_ascii=False,
         ).encode("utf-8")
@@ -103,8 +111,15 @@ class BigModelChatClient:
             with self.urlopen_fn(request, timeout=self.timeout) as response:
                 raw = response.read().decode("utf-8")
         except HTTPError as exc:
+            try:
+                detail = exc.read().decode("utf-8", errors="replace").strip()
+            except Exception:
+                detail = ""
+            if len(detail) > 2000:
+                detail = detail[:2000] + "..."
+            suffix = f": {detail}" if detail else ""
             raise RuntimeError(
-                f"BigModel chat request failed: HTTP {exc.code}"
+                f"BigModel chat request failed: HTTP {exc.code}{suffix}"
             ) from exc
         except URLError as exc:
             raise RuntimeError(
