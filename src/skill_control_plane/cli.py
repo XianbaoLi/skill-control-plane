@@ -30,6 +30,11 @@ from skill_control_plane.retrieval import (
     DEFAULT_DENSE_MODEL,
     BigModelDenseRetriever,
     DenseRetriever,
+    LLMRetrievalCardExtractor,
+    RETRIEVAL_CARD_VERSION,
+    apply_retrieval_cards,
+    build_retrieval_card_cache,
+    load_retrieval_cards,
 )
 
 
@@ -48,6 +53,23 @@ def _build_parser() -> argparse.ArgumentParser:
     snapshot.add_argument("--output", required=True)
     snapshot.add_argument("--source", required=True)
     snapshot.add_argument("--harness-commit")
+
+    retrieval_cards = corpus_subparsers.add_parser(
+        "retrieval-cards",
+        help="Build leakage-resistant RetrievalCard v0.1 JSONL with an offline LLM",
+    )
+    retrieval_cards.add_argument("root", help="Local Skill tree")
+    retrieval_cards.add_argument("--output", required=True, help="RetrievalCard JSONL")
+    retrieval_cards.add_argument(
+        "--extract-command",
+        required=True,
+        help="Completion command: prompt on stdin, JSON object on stdout",
+    )
+    retrieval_cards.add_argument(
+        "--force",
+        action="store_true",
+        help="Ignore matching cached cards and regenerate all Skills",
+    )
 
     eval_parser = subparsers.add_parser("eval", help="Evaluation utilities")
     eval_subparsers = eval_parser.add_subparsers(dest="eval_command", required=True)
@@ -236,6 +258,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--old-rewrite-command",
         required=True,
         help="Frozen old capability_need replay command: prompt on stdin, JSON on stdout",
+    )
+    retrieval_ablation.add_argument(
+        "--skill-representation",
+        choices=("metadata", "retrieval-card"),
+        default="metadata",
+        help="Skill index text: legacy name+description+tags or RetrievalCard v0.1",
+    )
+    retrieval_ablation.add_argument(
+        "--retrieval-cards",
+        help="RetrievalCard JSONL; required with --skill-representation retrieval-card",
     )
     retrieval_ablation.add_argument("--per-retriever-k", type=int, default=10)
     retrieval_ablation.add_argument("--rrf-k", type=int, default=60)
@@ -608,6 +640,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
 
+    if args.command == "corpus" and args.corpus_command == "retrieval-cards":
+        from skill_control_plane.runtime.capability_need import command_completer
+
+        skills = load_skill_tree(args.root)
+        stats = build_retrieval_card_cache(
+            skills,
+            extractor=LLMRetrievalCardExtractor(
+                command_completer(args.extract_command)
+            ),
+            output=args.output,
+            force=args.force,
+        )
+        print(
+            json.dumps(
+                {
+                    "version": RETRIEVAL_CARD_VERSION,
+                    "output": args.output,
+                    **stats,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+
     if args.command == "eval" and args.eval_command == "retrieval":
         _validate_snapshot(args.gold, args.manifest)
         cases = load_runtime_retrieval_gold(args.gold)
@@ -772,17 +829,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "eval" and args.eval_command == "retrieval-ablation":
         stage_cases = load_stage_transition_gold(args.gold)
         _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
+
+        skills = load_skill_tree(args.root)
+        if args.skill_representation == "retrieval-card":
+            if not args.retrieval_cards:
+                raise ValueError(
+                    "--skill-representation retrieval-card requires --retrieval-cards"
+                )
+            cards = load_retrieval_cards(args.retrieval_cards)
+            indexed_skills = apply_retrieval_cards(skills, cards)
+            skill_representation = RETRIEVAL_CARD_VERSION
+        else:
+            indexed_skills = [replace(skill, body="") for skill in skills]
+            skill_representation = "metadata-v0.1"
+
+        bm25 = BM25Retriever(indexed_skills)
         if args.dense_backend == "bigmodel":
-            skills = load_skill_tree(args.root)
-            metadata_skills = [replace(skill, body="") for skill in skills]
-            bm25 = BM25Retriever(metadata_skills)
             dense = BigModelDenseRetriever(
-                skills,
+                indexed_skills,
                 model_name=args.bigmodel_embedding_model,
                 dimensions=args.bigmodel_embedding_dimensions,
             )
         else:
-            bm25, dense = _build_retrievers(args.root, args.dense_model)
+            dense = DenseRetriever(indexed_skills, model_name=args.dense_model)
 
         from skill_control_plane.runtime.capability_need import (
             LLMCapabilityNeedExtractor,
@@ -799,6 +868,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             per_retriever_k=args.per_retriever_k,
             rrf_k=args.rrf_k,
             cutoffs=(5, 10),
+            skill_representation=skill_representation,
         )
 
         if args.as_json:
