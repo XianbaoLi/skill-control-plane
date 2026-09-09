@@ -12,6 +12,7 @@ from skill_control_plane.evals import (
     diagnose_stage_retrieval,
     evaluate_capability_facet_retrieval,
     evaluate_control_plane,
+    evaluate_frozen_query_retrieval_ablation,
     evaluate_stage_bundle_cases,
     evaluate_stage_reroute,
     evaluate_union_retrieval,
@@ -19,6 +20,7 @@ from skill_control_plane.evals import (
     load_runtime_retrieval_gold,
     load_stage_transition_gold,
     print_capability_facet_report,
+    print_frozen_query_retrieval_ablation,
 )
 from skill_control_plane.registry import load_skill_tree
 from skill_control_plane.retrieval import (
@@ -190,6 +192,54 @@ def _build_parser() -> argparse.ArgumentParser:
     capability_facets.add_argument("--per-query-k", type=int, default=10)
     capability_facets.add_argument("--rrf-k", type=int, default=60)
     capability_facets.add_argument("--json", action="store_true", dest="as_json")
+
+    retrieval_ablation = eval_subparsers.add_parser(
+        "retrieval-ablation",
+        help="Compare Dense, BM25, Union, and RRF using identical frozen old queries",
+    )
+    retrieval_ablation.add_argument("root", help="Local Skill tree")
+    retrieval_ablation.add_argument(
+        "--gold",
+        required=True,
+        help="Stage-transition Gold JSONL with raw runtime_evidence",
+    )
+    retrieval_ablation.add_argument(
+        "--manifest",
+        required=True,
+        help="Corpus manifest whose snapshot_id the Gold set references",
+    )
+    retrieval_ablation.add_argument("--dense-model", default=DEFAULT_DENSE_MODEL)
+    retrieval_ablation.add_argument(
+        "--dense-backend",
+        choices=("sentence-transformers", "bigmodel"),
+        default="sentence-transformers",
+        help="Dense embedding backend; BM25 stays unchanged",
+    )
+    retrieval_ablation.add_argument(
+        "--bigmodel-embedding-model",
+        default=os.environ.get(
+            "BIGMODEL_EMBEDDING_MODEL", DEFAULT_BIGMODEL_EMBEDDING_MODEL
+        ),
+    )
+    retrieval_ablation.add_argument(
+        "--bigmodel-embedding-dimensions",
+        type=int,
+        choices=(256, 512, 1024, 2048),
+        default=int(
+            os.environ.get(
+                "BIGMODEL_EMBEDDING_DIMENSIONS",
+                str(DEFAULT_BIGMODEL_EMBEDDING_DIMENSIONS),
+            )
+        ),
+    )
+    retrieval_ablation.add_argument(
+        "--old-rewrite-command",
+        required=True,
+        help="Frozen old capability_need replay command: prompt on stdin, JSON on stdout",
+    )
+    retrieval_ablation.add_argument("--per-retriever-k", type=int, default=10)
+    retrieval_ablation.add_argument("--rrf-k", type=int, default=60)
+    retrieval_ablation.add_argument("--json", action="store_true", dest="as_json")
 
     control_plane = eval_subparsers.add_parser(
         "control-plane",
@@ -717,6 +767,44 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
             print_capability_facet_report(report)
+        return 0
+
+    if args.command == "eval" and args.eval_command == "retrieval-ablation":
+        stage_cases = load_stage_transition_gold(args.gold)
+        _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
+        if args.dense_backend == "bigmodel":
+            skills = load_skill_tree(args.root)
+            metadata_skills = [replace(skill, body="") for skill in skills]
+            bm25 = BM25Retriever(metadata_skills)
+            dense = BigModelDenseRetriever(
+                skills,
+                model_name=args.bigmodel_embedding_model,
+                dimensions=args.bigmodel_embedding_dimensions,
+            )
+        else:
+            bm25, dense = _build_retrievers(args.root, args.dense_model)
+
+        from skill_control_plane.runtime.capability_need import (
+            LLMCapabilityNeedExtractor,
+            command_completer,
+        )
+
+        report = evaluate_frozen_query_retrieval_ablation(
+            stage_cases,
+            bm25=bm25,
+            dense=dense,
+            old_extractor=LLMCapabilityNeedExtractor(
+                command_completer(args.old_rewrite_command)
+            ),
+            per_retriever_k=args.per_retriever_k,
+            rrf_k=args.rrf_k,
+            cutoffs=(5, 10),
+        )
+
+        if args.as_json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print_frozen_query_retrieval_ablation(report)
         return 0
 
     if args.command == "eval" and args.eval_command == "control-plane":
