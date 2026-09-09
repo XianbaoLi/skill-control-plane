@@ -86,8 +86,8 @@ def test_facets_multi_query_can_recover_target_missed_by_old_rewrite():
     assert report["old"]["recall_at_5"] == 0
     assert report["facets"]["recall_at_5"] == 1
     stage = report["stages"][0]
-    assert stage["old"]["required_ranks"]["target-skill"] is None
-    assert stage["facets"]["required_ranks"]["target-skill"] == 1
+    assert stage["old"]["new_required_ranks"]["target-skill"] is None
+    assert stage["facets"]["new_required_ranks"]["target-skill"] == 1
     assert stage["facets"]["queries"] == [
         "root cause analysis",
         "runtime inspection",
