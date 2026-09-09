@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
 from skill_control_plane.models import SkillRecord
-from skill_control_plane.runtime.llm_context import TextCompleter
+TextCompleter = Callable[[str], str]
 
 RETRIEVAL_CARD_VERSION = "retrieval-card-v0.1"
 
