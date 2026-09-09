@@ -146,5 +146,8 @@ def test_capability_facets_cli_has_frozen_v04_defaults():
     )
     assert args.per_query_k == 10
     assert args.rrf_k == 60
+    assert args.dense_backend == "sentence-transformers"
+    assert args.bigmodel_embedding_model == "embedding-3"
+    assert args.bigmodel_embedding_dimensions == 2048
     assert args.old_rewrite_command == "old-provider"
     assert args.capability_facets_command == "hermes-provider"
