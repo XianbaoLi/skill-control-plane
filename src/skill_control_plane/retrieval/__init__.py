@@ -5,6 +5,16 @@ from .bigmodel import (
     DEFAULT_BIGMODEL_EMBEDDING_MODEL,
     BigModelDenseRetriever,
 )
+from .cards import (
+    RETRIEVAL_CARD_VERSION,
+    LLMRetrievalCardExtractor,
+    RetrievalCard,
+    apply_retrieval_cards,
+    build_retrieval_card_cache,
+    build_retrieval_card_prompt,
+    load_retrieval_cards,
+    validate_retrieval_cards,
+)
 from .dense import DEFAULT_DENSE_MODEL, DenseRetriever, metadata_text
 from .fusion import candidate_union, reciprocal_rank_fusion
 
@@ -14,9 +24,17 @@ __all__ = [
     "DEFAULT_BIGMODEL_EMBEDDING_DIMENSIONS",
     "DEFAULT_BIGMODEL_EMBEDDING_MODEL",
     "DEFAULT_DENSE_MODEL",
+    "LLMRetrievalCardExtractor",
+    "RETRIEVAL_CARD_VERSION",
+    "RetrievalCard",
     "DenseRetriever",
     "Retriever",
+    "apply_retrieval_cards",
+    "build_retrieval_card_cache",
+    "build_retrieval_card_prompt",
     "candidate_union",
+    "load_retrieval_cards",
     "metadata_text",
     "reciprocal_rank_fusion",
+    "validate_retrieval_cards",
 ]
