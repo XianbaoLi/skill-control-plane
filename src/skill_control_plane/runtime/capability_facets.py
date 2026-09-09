@@ -112,3 +112,29 @@ class LLMCapabilityFacetExtractor:
                 evidence_basis=data.get("evidence_basis", ""),
             )
         )
+
+
+@dataclass(frozen=True, slots=True)
+class FacetQueries:
+    queries: tuple[str, ...]
+    facets: CapabilityFacets | None
+    status: str
+
+
+def extract_facet_queries(
+    extractor: CapabilityFacetExtractor,
+    initial_task: str,
+    runtime_evidence: Sequence[str],
+) -> FacetQueries:
+    """Return facet queries, with raw-evidence fallback for unsafe extraction."""
+
+    raw = "\n".join(runtime_evidence)
+    try:
+        facets = validate_facets(extractor.extract(initial_task, runtime_evidence))
+    except Exception as exc:
+        return FacetQueries((raw,), None, f"error:{type(exc).__name__}")
+
+    if facets.confidence is not None and facets.confidence < 0.5:
+        return FacetQueries((raw,), facets, "low-confidence")
+
+    return FacetQueries(facets.capabilities, facets, "ok")
