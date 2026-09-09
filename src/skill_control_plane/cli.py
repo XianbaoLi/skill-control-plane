@@ -468,6 +468,19 @@ def _build_retrievers(root: str, dense_model: str) -> tuple[BM25Retriever, Dense
     )
 
 
+def _build_indexed_retrievers(indexed_skills, args):
+    bm25 = BM25Retriever(indexed_skills)
+    if args.dense_backend == "bigmodel":
+        dense = BigModelDenseRetriever(
+            indexed_skills,
+            model_name=args.bigmodel_embedding_model,
+            dimensions=args.bigmodel_embedding_dimensions,
+        )
+    else:
+        dense = DenseRetriever(indexed_skills, model_name=args.dense_model)
+    return bm25, dense
+
+
 def _print_retrieval_report(report: dict[str, object]) -> None:
     print(
         f"{'CASE':<9} {'BM25':>7} {'DENSE':>7} "
