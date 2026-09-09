@@ -66,6 +66,7 @@ def test_bigmodel_chat_client_uses_openai_compatible_endpoint_and_returns_json()
         model="glm-test",
         temperature=0.1,
         max_tokens=900,
+        reasoning_effort="none",
         timeout=12,
         urlopen_fn=fake_urlopen,
     )
@@ -76,6 +77,7 @@ def test_bigmodel_chat_client_uses_openai_compatible_endpoint_and_returns_json()
     assert captured["payload"]["model"] == "glm-test"
     assert captured["payload"]["temperature"] == 0.1
     assert captured["payload"]["max_tokens"] == 900
+    assert captured["payload"]["reasoning_effort"] == "none"
     assert captured["payload"]["stream"] is False
     assert captured["payload"]["messages"][-1]["content"] == "extract this skill"
     assert captured["headers"]["Authorization"] == "Bearer test-key"
