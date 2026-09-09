@@ -205,7 +205,12 @@ def build_retrieval_card_cache(
         if output_path.exists() and not force
         else {}
     )
-    cards: dict[str, RetrievalCard] = {}
+    skill_ids = {skill.skill_id for skill in skill_list}
+    cards: dict[str, RetrievalCard] = {
+        skill_id: card
+        for skill_id, card in existing.items()
+        if skill_id in skill_ids
+    }
     extracted = 0
     reused = 0
 
