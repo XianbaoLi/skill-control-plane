@@ -6,6 +6,7 @@ from .bigmodel import (
     BigModelDenseRetriever,
 )
 from .cards import (
+    RETRIEVAL_CARD_FIELDS,
     RETRIEVAL_CARD_VERSION,
     LLMRetrievalCardExtractor,
     RetrievalCard,
@@ -25,6 +26,7 @@ __all__ = [
     "DEFAULT_BIGMODEL_EMBEDDING_MODEL",
     "DEFAULT_DENSE_MODEL",
     "LLMRetrievalCardExtractor",
+    "RETRIEVAL_CARD_FIELDS",
     "RETRIEVAL_CARD_VERSION",
     "RetrievalCard",
     "DenseRetriever",
