@@ -26,6 +26,7 @@ from .retrieval_ablation import (
 )
 from .representation_ablation import (
     RETRIEVAL_CARD_FIELD_ABLATIONS,
+    print_field_ablation_summary,
     require_min_target_transitions,
     summarize_field_ablation_reports,
     target_transition_count,
@@ -60,6 +61,7 @@ __all__ = [
     "load_runtime_retrieval_gold",
     "load_stage_transition_gold",
     "print_capability_facet_report",
+    "print_field_ablation_summary",
     "print_frozen_query_retrieval_ablation",
     "print_query_robustness_comparison",
     "QUERY_VARIANT_VERSION",
