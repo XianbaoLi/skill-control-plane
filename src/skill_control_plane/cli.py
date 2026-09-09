@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
-from skill_control_plane.corpus import write_corpus_manifest
+from skill_control_plane.corpus import build_corpus_manifest, write_corpus_manifest
 from skill_control_plane.evals import (
     LLMQueryParaphraser,
     RETRIEVAL_CARD_FIELD_ABLATIONS,
@@ -451,6 +451,19 @@ def _validate_snapshot_id(gold_snapshot: str, manifest_path: str) -> None:
         raise ValueError(
             "Gold/manifest snapshot mismatch: "
             f"gold={gold_snapshot}, manifest={manifest_snapshot}"
+        )
+
+
+def _validate_root_snapshot(root: str, manifest_path: str) -> None:
+    manifest_snapshot = _manifest_snapshot_id(manifest_path)
+    actual_snapshot = str(
+        build_corpus_manifest(root, source="runtime-validation").get("snapshot_id", "")
+    )
+    if actual_snapshot != manifest_snapshot:
+        raise ValueError(
+            "Skill root/manifest snapshot mismatch: "
+            f"root={actual_snapshot}, manifest={manifest_snapshot}. "
+            "Use the frozen Skill corpus that produced this manifest."
         )
 
 
@@ -992,6 +1005,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "eval" and args.eval_command == "retrieval-ablation":
         stage_cases = load_stage_transition_gold(args.gold)
         _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
+        _validate_root_snapshot(args.root, args.manifest)
 
         skills = load_skill_tree(args.root)
         if args.skill_representation == "retrieval-card":
@@ -1043,6 +1057,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "eval" and args.eval_command == "retrieval-field-ablation":
         stage_cases = load_stage_transition_gold(args.gold)
         _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
+        _validate_root_snapshot(args.root, args.manifest)
         require_min_target_transitions(
             stage_cases,
             minimum=args.min_target_transitions,
@@ -1108,6 +1123,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "eval" and args.eval_command == "retrieval-robustness":
         stage_cases = load_stage_transition_gold(args.gold)
         _validate_snapshot_id(stage_cases[0].snapshot_id, args.manifest)
+        _validate_root_snapshot(args.root, args.manifest)
         require_min_target_transitions(
             stage_cases,
             minimum=args.min_target_transitions,
