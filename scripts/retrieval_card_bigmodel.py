@@ -35,6 +35,11 @@ def main() -> None:
     )
     parser.add_argument("--temperature", type=float, default=0.1)
     parser.add_argument("--max-tokens", type=int, default=1200)
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=("max", "xhigh", "high", "medium", "low", "minimal", "none"),
+        default="none",
+    )
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--audit-dir", type=Path)
     args = parser.parse_args()
@@ -49,6 +54,7 @@ def main() -> None:
         base_url=args.base_url,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
+        reasoning_effort=args.reasoning_effort,
         timeout=args.timeout,
     )
 
@@ -65,6 +71,7 @@ def main() -> None:
                         "base_url": args.base_url,
                         "temperature": args.temperature,
                         "max_tokens": args.max_tokens,
+                        "reasoning_effort": args.reasoning_effort,
                         "error_type": type(exc).__name__,
                     },
                     ensure_ascii=False,
@@ -86,6 +93,7 @@ def main() -> None:
                     "base_url": args.base_url,
                     "temperature": args.temperature,
                     "max_tokens": args.max_tokens,
+                    "reasoning_effort": args.reasoning_effort,
                     "completion": json.loads(completion),
                 },
                 ensure_ascii=False,
