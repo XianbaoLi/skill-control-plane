@@ -40,6 +40,18 @@ def main() -> None:
         type=Path,
         help="Optional JSONL summary of frozen queries for human inspection.",
     )
+    parser.add_argument(
+        "--case-id",
+        action="append",
+        default=[],
+        help="Optional case filter; may be repeated.",
+    )
+    parser.add_argument(
+        "--stage-id",
+        action="append",
+        default=[],
+        help="Optional stage filter; may be repeated.",
+    )
     args = parser.parse_args()
 
     cases = load_stage_transition_gold(args.gold)
@@ -49,7 +61,11 @@ def main() -> None:
 
     rows: list[dict[str, object]] = []
     for case in cases:
+        if args.case_id and case.case_id not in set(args.case_id):
+            continue
         for stage in case.stages[1:]:
+            if args.stage_id and stage.stage_id not in set(args.stage_id):
+                continue
             if not stage.new_required:
                 continue
             result = extract_query(
