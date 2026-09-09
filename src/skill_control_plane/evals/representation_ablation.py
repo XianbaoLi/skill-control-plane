@@ -118,3 +118,31 @@ def summarize_field_ablation_reports(
         "variants": variants,
         "drop_from_full": field_importance,
     }
+
+
+def print_field_ablation_summary(report: Mapping[str, Any]) -> None:
+    print("=== RETRIEVAL CARD FIELD ABLATION ===")
+    print(f"target_transitions: {report['target_transition_count']}")
+    print(
+        "new_required_skill_occurrences: "
+        f"{report['new_required_skill_occurrences']}"
+    )
+    print()
+    print("Positive drop means the removed field was helping retrieval.")
+    for field, drops in report["drop_from_full"].items():
+        print()
+        print(f"[remove {field}]")
+        for arm in ("dense", "bm25", "rrf"):
+            values = drops[arm]
+            formatted = " ".join(
+                f"{key}={float(value):+.4f}"
+                for key, value in values.items()
+            )
+            print(f"  {arm}: {formatted}")
+        union = drops["union"]
+        print(
+            "  union: "
+            f"candidate_recall={float(union['candidate_recall']):+.4f} "
+            f"full_transition_coverage="
+            f"{float(union['full_transition_coverage']):+.4f}"
+        )
