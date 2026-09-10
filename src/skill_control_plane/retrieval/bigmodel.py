@@ -14,6 +14,7 @@ DEFAULT_BIGMODEL_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
 DEFAULT_BIGMODEL_EMBEDDING_MODEL = "embedding-3"
 DEFAULT_BIGMODEL_EMBEDDING_DIMENSIONS = 2048
 BIGMODEL_MAX_BATCH = 64
+DEFAULT_DENSE_BATCH_SIZE = 8
 
 EmbeddingBatchFn = Callable[[Sequence[str]], list[list[float]]]
 
@@ -32,7 +33,8 @@ def _dot(left: Sequence[float], right: Sequence[float]) -> float:
 class BigModelEmbeddingClient:
     """Minimal HTTP client for BigModel's embedding API.
 
-    Credentials stay in BIGMODEL_API_KEY (or are injected explicitly in tests).
+    Embedding configuration is separate from the chat Coding Plan endpoint.
+    Credentials prefer PARATERA_API_KEY, with legacy BigModel fallbacks.
     No SDK dependency is required.
     """
 
@@ -41,20 +43,39 @@ class BigModelEmbeddingClient:
         *,
         api_key: str | None = None,
         base_url: str | None = None,
-        model: str = DEFAULT_BIGMODEL_EMBEDDING_MODEL,
-        dimensions: int = DEFAULT_BIGMODEL_EMBEDDING_DIMENSIONS,
+        model: str | None = None,
+        dimensions: int | None = None,
         timeout: float = 60.0,
     ) -> None:
-        self.api_key = api_key or os.environ.get("BIGMODEL_API_KEY", "")
+        self.api_key = (
+            api_key
+            or os.environ.get("PARATERA_API_KEY")
+            or os.environ.get("BIGMODEL_EMBEDDING_API_KEY")
+            or os.environ.get("BIGMODEL_API_KEY", "")
+        )
         if not self.api_key:
             raise RuntimeError(
-                "BIGMODEL_API_KEY is required for the BigModel dense backend"
+                "PARATERA_API_KEY, BIGMODEL_EMBEDDING_API_KEY, or "
+                "BIGMODEL_API_KEY is required for the dense backend"
             )
         self.base_url = (
-            base_url or os.environ.get("BIGMODEL_BASE_URL") or DEFAULT_BIGMODEL_BASE_URL
+            base_url or os.environ.get("BIGMODEL_EMBEDDING_BASE_URL") or DEFAULT_BIGMODEL_BASE_URL
         ).rstrip("/")
-        self.model = model
-        self.dimensions = dimensions
+        self.model = (
+            model
+            or os.environ.get("BIGMODEL_EMBEDDING_MODEL")
+            or DEFAULT_BIGMODEL_EMBEDDING_MODEL
+        )
+        configured_dimensions = (
+            str(dimensions)
+            if dimensions is not None
+            else os.environ.get("BIGMODEL_EMBEDDING_DIMENSIONS")
+        )
+        self.dimensions = int(
+            configured_dimensions or DEFAULT_BIGMODEL_EMBEDDING_DIMENSIONS
+        )
+        if self.dimensions < 1:
+            raise ValueError("embedding dimensions must be positive")
         self.timeout = timeout
 
     def __call__(self, texts: Sequence[str]) -> list[list[float]]:
@@ -117,12 +138,19 @@ class BigModelDenseRetriever:
             model=model_name,
             dimensions=dimensions,
         )
+        self.batch_size = int(
+            os.environ.get("BIGMODEL_EMBEDDING_BATCH_SIZE", DEFAULT_DENSE_BATCH_SIZE)
+        )
+        if not 1 <= self.batch_size <= BIGMODEL_MAX_BATCH:
+            raise ValueError(
+                f"embedding batch size must be between 1 and {BIGMODEL_MAX_BATCH}"
+            )
         self._embeddings = self._encode_many(self._texts)
 
     def _encode_many(self, texts: Sequence[str]) -> list[list[float]]:
         vectors: list[list[float]] = []
-        for start in range(0, len(texts), BIGMODEL_MAX_BATCH):
-            batch = texts[start : start + BIGMODEL_MAX_BATCH]
+        for start in range(0, len(texts), self.batch_size):
+            batch = texts[start : start + self.batch_size]
             vectors.extend(self._embed_batch(batch))
         return [_normalize(vector) for vector in vectors]
 

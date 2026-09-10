@@ -95,3 +95,17 @@ def test_glm_53_rejects_unsupported_reasoning_effort_locally():
             reasoning_effort="none",
             urlopen_fn=lambda *args, **kwargs: None,
         )
+
+
+def test_chat_specific_configuration_precedes_legacy(monkeypatch):
+    monkeypatch.setenv("BIGMODEL_CHAT_API_KEY", "chat-key")
+    monkeypatch.setenv("BIGMODEL_API_KEY", "legacy-key")
+    monkeypatch.setenv("BIGMODEL_CHAT_BASE_URL", "https://chat.example.test/v4/")
+    monkeypatch.setenv("BIGMODEL_BASE_URL", "https://legacy.example.test/v4")
+    monkeypatch.setenv("BIGMODEL_CHAT_MODEL", "GLM-5.3-Flash")
+
+    client = BigModelChatClient()
+
+    assert client.api_key == "chat-key"
+    assert client.base_url == "https://chat.example.test/v4"
+    assert client.model == "GLM-5.3-Flash"

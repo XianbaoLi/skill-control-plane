@@ -1,0 +1,29 @@
+{
+  "corpus": "local_artifacts/v0.5/hermes-current87",
+  "manifest": "local_artifacts/v0.5/hermes-current87-manifest.json",
+  "cards": "local_artifacts/v0.5/retrieval-cards-v0.1-current87.jsonl",
+  "embedding_cache": "local_artifacts/v0.6/robustness-current87-13target-65query-embeddings.json",
+  "k": 5,
+  "bundles": [
+    {
+      "bundle_id": "github-pr-review",
+      "purpose": "Review a GitHub pull request, inspect its diff, leave inline comments, and verify CI before merging.",
+      "skill_ids": ["github-auth", "github-code-review", "github-pr-workflow", "requesting-code-review", "github-issue-to-pr"],
+      "status": "active",
+      "validated": true
+    },
+    {
+      "bundle_id": "python-failure-investigation",
+      "purpose": "Investigate a failing Python test, find the root cause, inspect the codebase, and use a debugger to inspect runtime variables.",
+      "skill_ids": ["systematic-debugging", "codebase-inspection", "requesting-code-review", "github-pr-workflow"],
+      "status": "active",
+      "validated": true
+    }
+  ],
+  "cases": [
+    {"case_id": "direct", "expected": "DIRECT", "need": "Search arXiv for recent papers on retrieval augmented generation."},
+    {"case_id": "reuse", "expected": "REUSE", "need": "Review a GitHub pull request, inspect its diff, leave inline comments, and verify CI before merging."},
+    {"case_id": "extend", "expected": "EXTEND", "need": "Investigate a failing Python test, find the root cause, inspect the codebase, and use a debugger to inspect runtime variables."},
+    {"case_id": "create", "expected": "CREATE", "need": "Extract text from scanned PDF documents and turn the findings into a PowerPoint presentation."}
+  ]
+}

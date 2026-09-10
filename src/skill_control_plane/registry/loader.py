@@ -1,12 +1,28 @@
 from __future__ import annotations
 
 import hashlib
+import io
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from skill_control_plane.models import SkillRecord
+
+
+def decode_skill_bytes(data: bytes) -> str:
+    """Match read_text(encoding='utf-8-sig', errors='replace', newline=None).
+
+    Manifest hashes identify decoded text, not raw bytes: strip a UTF-8 BOM,
+    replace invalid UTF-8, and translate CRLF/bare CR to LF. Do not strip text.
+    """
+    with io.TextIOWrapper(io.BytesIO(data), encoding="utf-8-sig", errors="replace") as stream:
+        return stream.read()
+
+
+def skill_content_hash(data: bytes) -> str:
+    """The registry/manifest identity hash, also usable for historical Git blobs."""
+    return hashlib.sha256(decode_skill_bytes(data).encode("utf-8")).hexdigest()
 
 
 def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
@@ -46,7 +62,8 @@ def load_skill_tree(root: str | Path) -> list[SkillRecord]:
     root_path = Path(root).resolve()
     skills: list[SkillRecord] = []
     for skill_md in sorted(root_path.rglob("SKILL.md")):
-        raw = skill_md.read_text(encoding="utf-8-sig", errors="replace")
+        data = skill_md.read_bytes()
+        raw = decode_skill_bytes(data)
         frontmatter, body = _split_frontmatter(raw)
         skill_id = str(frontmatter.get("name") or skill_md.parent.name).strip()
         relative_path = skill_md.resolve().relative_to(root_path)
@@ -59,7 +76,7 @@ def load_skill_tree(root: str | Path) -> list[SkillRecord]:
                 body=body.strip(),
                 source_path=str(skill_md),
                 tags=_extract_tags(frontmatter),
-                content_hash=hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+                content_hash=skill_content_hash(data),
                 category=category,
             )
         )

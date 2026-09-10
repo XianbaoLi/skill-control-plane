@@ -43,9 +43,14 @@ class BigModelChatClient:
     urlopen_fn: UrlopenFn = urlopen
 
     def __post_init__(self) -> None:
-        self.api_key = self.api_key or os.environ.get("BIGMODEL_API_KEY", "")
+        self.api_key = (
+            self.api_key
+            or os.environ.get("BIGMODEL_CHAT_API_KEY")
+            or os.environ.get("BIGMODEL_API_KEY", "")
+        )
         self.base_url = (
             self.base_url
+            or os.environ.get("BIGMODEL_CHAT_BASE_URL")
             or os.environ.get("BIGMODEL_BASE_URL")
             or DEFAULT_BIGMODEL_BASE_URL
         ).rstrip("/")
@@ -55,7 +60,9 @@ class BigModelChatClient:
             or DEFAULT_BIGMODEL_CHAT_MODEL
         )
         if not self.api_key:
-            raise RuntimeError("BIGMODEL_API_KEY is required")
+            raise RuntimeError(
+                "BIGMODEL_CHAT_API_KEY or BIGMODEL_API_KEY is required"
+            )
         if not 0 <= self.temperature <= 2:
             raise ValueError("temperature must be between 0 and 2")
         if self.max_tokens < 1:
