@@ -1,5 +1,9 @@
 # Runtime Capability Harness
 
+For the single-model, same-history experiment with real Skill body injection,
+see [Experimental Skill Agent](experimental-skill-agent.md). It uses separate
+search/apply stages; the combined resolver API documented below remains available.
+
 The harness maintains the current capability state and renders the capability
 context for every LLM turn. The task LLM decides when its next step requires
 missing capabilities and calls `load_capability(need)`. Retrieval searches only

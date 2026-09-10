@@ -83,19 +83,26 @@ class BigModelChatClient:
         if not prompt.strip():
             raise ValueError("prompt must not be empty")
 
+        return canonical_json_text(self.complete_messages([
+            {"role": "system", "content": (
+                "You are a deterministic information-extraction engine. "
+                "Return only the JSON object requested by the user prompt."
+            )},
+            {"role": "user", "content": prompt},
+        ]))
+
+    def complete_messages(self, messages: list[dict[str, str]]) -> str:
+        """Send the complete conversation unchanged; return raw assistant text.
+
+        No extraction prompt or JSON canonicalization is added here. The caller
+        owns its action protocol, including duplicate-key validation.
+        """
+        if not messages:
+            raise ValueError("messages must not be empty")
         payload = json.dumps(
             {
                 "model": self.model,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a deterministic information-extraction engine. "
-                            "Return only the JSON object requested by the user prompt."
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
+                "messages": messages,
                 "stream": False,
                 "thinking": {"type": "enabled"},
                 "reasoning_effort": self.reasoning_effort,
@@ -155,4 +162,4 @@ class BigModelChatClient:
                 f"tool_calls={has_tool_calls})"
             )
 
-        return canonical_json_text(content)
+        return content

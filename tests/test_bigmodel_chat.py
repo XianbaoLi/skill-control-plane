@@ -109,3 +109,20 @@ def test_chat_specific_configuration_precedes_legacy(monkeypatch):
     assert client.api_key == "chat-key"
     assert client.base_url == "https://chat.example.test/v4"
     assert client.model == "GLM-5.3-Flash"
+
+
+def test_complete_messages_sends_history_unchanged_and_preserves_raw_json():
+    captured = []
+    raw = '{"type":"final","type":"load_capability","content":"done"}'
+    def fake_urlopen(request, timeout):
+        captured.append(json.loads(request.data))
+        return FakeResponse({'choices': [{'message': {'content': raw}}]})
+    client = BigModelChatClient(api_key='test', urlopen_fn=fake_urlopen)
+    messages = [{'role': 'system', 'content': 'agent protocol'},
+                {'role': 'user', 'content': 'original task'},
+                {'role': 'assistant', 'content': '{"type":"load_capability","need":"PDF"}'},
+                {'role': 'user', 'content': '{"type":"capability_tool_result"}'}]
+    assert client.complete_messages(messages) == raw
+    assert captured[0]['messages'] == messages
+    assert 'extraction' not in json.dumps(captured[0]['messages'])
+    assert captured[0]['model'] == client.model
