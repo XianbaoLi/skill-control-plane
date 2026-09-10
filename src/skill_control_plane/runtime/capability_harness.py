@@ -34,11 +34,19 @@ class RuntimeCapabilityHarness:
         return tuple(sorted(self.state.direct_skills.union(
             *(set(b.skill_ids) for b in self.state.active_bundles))))
 
-    def render_loaded_instructions(self) -> str:
-        return 'Loaded Skill Instructions\n' + json.dumps([
-            {'skill_id': skill_id, 'body': self.discovery.records[skill_id].body}
-            for skill_id in self.loaded_skill_ids
-        ], ensure_ascii=False, separators=(',', ':'))
+    def render_bundle_context(self) -> str:
+        """Compact maintained capabilities; no direct surface, bodies or cards."""
+        return json.dumps({'maintained_bundles': [
+            {'bundle_id': bundle.bundle_id, 'purpose': bundle.purpose,
+             'members': [
+                 {'skill_id': skill_id,
+                  'name': self.discovery.records[skill_id].name,
+                  'short_description': ' '.join(
+                      self.discovery.records[skill_id].description.split())[:240]}
+                 for skill_id in sorted(bundle.skill_ids)
+             ]}
+            for bundle in sorted(self.state.active_bundles, key=lambda b: b.bundle_id)
+        ]}, ensure_ascii=False, separators=(',', ':'))
 
     def search_capability(self, need: str, *, k: int = 10) -> SkillDiscoveryResult:
         """Agent load_capability stage: search only, never call a resolver."""
@@ -48,16 +56,24 @@ class RuntimeCapabilityHarness:
         self.pending_candidates = candidates
         return candidates
 
-    def apply_capability(self, raw_decision: str) -> str | None:
+    def apply_capability(self, raw_decision: str) -> dict:
         """Apply against the latest search only; consume it after success."""
         if self.pending_candidates is None:
             raise ValueError('apply_capability requires a fresh load_capability result')
         validate_state(self.state, self.discovery)
         decision = validate_decision(raw_decision, self.pending_candidates, self.state)
         state, target = apply_decision(decision, self.pending_candidates, self.state)
+        result = {
+            'action': decision.action, 'affected_bundle_id': target,
+            'selected_skill_ids': list(decision.skill_ids),
+            'skill_bodies': [
+                {'skill_id': skill_id, 'body': self.discovery.records[skill_id].body}
+                for skill_id in decision.skill_ids
+            ],
+        }
         self.state = state
         self.pending_candidates = None
-        return target
+        return result
 
     def render_context(self) -> str:
         return (

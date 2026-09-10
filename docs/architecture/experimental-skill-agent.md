@@ -1,4 +1,4 @@
-# Experimental Skill Agent v0.1
+# Experimental Skill Agent v0.2
 
 This bounded experiment tests dynamic Skill management using one conversation
 client and one growing history. It is not an execution agent or a general agent
@@ -13,8 +13,8 @@ User task + retained history
   → same client.complete_messages([current system context, *history])
   → assistant JSON apply_capability(DIRECT / EXTEND / CREATE)
   → Harness.apply_capability → validate_decision → apply_decision
-  → new RuntimeCapabilityState + application result appended to history
-  → same client, retained history + regenerated system context with selected bodies
+  → new RuntimeCapabilityState + apply result with selected bodies appended to history
+  → same client, retained history + regenerated system containing Bundle metadata only
   → continue or final
 ```
 
@@ -44,7 +44,8 @@ existing callers and tests.
 The Agent never calls `RuntimeCapabilityLoader.load_capability` or instantiates
 `LLMCapabilityResolver`. The harness accepts either a legacy loader or a discovery
 instance; the latter needs no resolver credentials. Legacy combined loading and
-metadata-only `render_context()` remain compatible.
+metadata-only `render_context()` remain compatible. The experimental Agent uses
+`render_bundle_context()` instead; it does not use the legacy direct-skill surface.
 
 ## Action protocol and history
 
@@ -58,7 +59,8 @@ Each completion is exactly one JSON object with one of three `type` values:
 A load action calls `harness.search_capability`, performing one Skill search and
 storing the returned candidates without changing runtime state. It returns the
 complete `SkillDiscoveryResult` as a JSON `capability_tool_result` envelope in a
-user-role message. Apply results use the same envelope. This is a provider-neutral
+user-role message. Apply results use the same envelope and include `action`,
+`affected_bundle_id`, `selected_skill_ids` and `skill_bodies` (ID/full body pairs). This is a provider-neutral
 JSON protocol, not native tool calling; the system prompt explicitly identifies
 these user-role envelopes as tool data. Every assistant action, original user
 message and result remains in `agent.history` for subsequent model calls.
@@ -73,20 +75,37 @@ remain committed if a later step fails.
 
 ## Loaded context and validation
 
-The system context contains the short self-trigger rule, action schemas, runtime
-metadata and `Loaded Skill Instructions`. Metadata lists direct skills and every
-maintained bundle. The instruction section reads `SkillRecord.body` for exactly:
+The system context contains only the short self-trigger rule, action interfaces,
+and `Runtime Bundles`. `render_bundle_context()` reads each maintained bundle from
+state and renders its `bundle_id`, `purpose`, and `members`. Each member has
+`skill_id`, `name`, and `short_description` from its `SkillRecord`. Descriptions
+have whitespace collapsed and are capped at 240 characters; bundles and members
+are sorted by ID. No Retrieval Card fields or global catalog are included.
 
-```text
-direct_skills ∪ all maintained bundle member skill_ids
-```
+Full Skill bodies are never placed in the system context, including on the first
+call with a nonempty initial state. DIRECT state semantics remain unchanged, but
+DIRECT skills are not a permanent system display surface. Initial state alone
+does not deliver instructions: bodies enter this conversation only after an
+explicit successful application.
 
-Each selected body is included once in stable ID order. Initial empty state injects
-no bodies. Retrieval result messages include only candidate representations and
-evidence; they contain no Skill bodies. The complete registry and Retrieval Card
-library are never rendered. Selected instructions provide task guidance while the
-system protocol remains authoritative. Supporting files referenced by SKILL.md
-are not automatically read or executed.
+`harness.apply_capability()` prepares a result containing the validated selected
+IDs and their exact `SkillRecord.body` values before committing the new state.
+The Agent appends those bodies as the apply tool result. It tracks delivered IDs
+for this conversation, so selecting the same skill again (including DIRECT then
+CREATE/EXTEND, or a later `run()`) retains selected IDs in the result but omits
+already-delivered bodies. Deduplication belongs to conversation history, not to
+runtime lifecycle. Other consumers of the harness receive all selected bodies.
+
+The original apply result remains in history and is included in later requests;
+no new body copy is appended per turn. This still transmits that history text on
+every full-history request; it is not provider caching or context truncation.
+A separate Agent with a new history has a separate delivered-ID set. External
+history editing/restoration is not supported in this experiment.
+
+Retrieval results contain only candidate representations and evidence, not Skill
+bodies. Unselected bodies and the full library are never supplied to the Agent.
+Skill instructions provide task guidance while the action protocol remains
+authoritative. Supporting files referenced by SKILL.md are not read or executed.
 
 Apply reuses `validate_decision` and `apply_decision`: candidates must come from
 the latest search, the target must exist in current state, and EXTEND must add at
@@ -99,8 +118,9 @@ handling. There is no bundle retrieval or bundle Top-K.
 ## Trace and live acceptance
 
 Each step records the model response/action, need, retrieved and selected IDs,
-organization action, state before/after, injected IDs at the model call and after
-the action, and an error type if applicable. State snapshots are independent of
+organization action, state before/after, `system_skill_body_ids` (always empty),
+`history_skill_body_ids` at the call, `appended_skill_body_ids` for that step,
+`history_skill_body_ids_after`, and an error type if applicable. State snapshots are independent of
 later mutation. Provider error bodies are excluded from traces. The live script
 also records each full model request history, response, model configuration
 (excluding credentials), registry snapshot ID and final answer.
@@ -119,7 +139,12 @@ PYTHONPATH=src .venv/bin/python scripts/experimental_skill_agent_e2e.py
 The live script uses the current87 manifest/cards, real configured Dense embeddings
 and BM25/RRF. There is no fallback to lexical-only retrieval and no injected model
 action/candidate fixture. It checks that a model-triggered search and successful
-application are followed by another model call with the selected instructions.
+application are followed by another model call with the selected instructions in
+history. An independent audit of actual model messages checks no registry bodies
+appear in system, unselected bodies stay hidden, each delivered body matches its
+record and occurs once in tool results, Bundle members use only the documented
+metadata, and the earlier history/assistant responses are retained. Per-call
+`context_audit` entries expose system bundles and history body IDs separately.
 Traces are written to unique local directories even on failure. Ordinary pytest
 is network-free.
 

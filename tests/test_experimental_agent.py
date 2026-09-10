@@ -73,22 +73,30 @@ def test_one_conversation_search_apply_inject_final(harness, action):
         assert len(call) == 2 + index * 2
         if index:
             assert call[1:len(client.calls[index-1])] == client.calls[index-1][1:]
-        assert 'MAIL_BODY_ONLY_SELECTED' in call[0]['content']
-        assert ('PDF_BODY_ONLY_SELECTED' in call[0]['content']) == (index == 2)
+        assert 'BODY_' not in call[0]['content']
+        assert 'MAIL_BODY_ONLY_SELECTED' not in json.dumps(call)
+        assert ('PDF_BODY_ONLY_SELECTED' in json.dumps(call[1:])) == (index == 2)
         assert 'SLIDES_BODY_ONLY_SELECTED' not in json.dumps(call)
         assert 'HIDDEN_BODY_NEVER_VISIBLE' not in json.dumps(call)
-    metadata = json.loads(client.calls[-1][0]['content'].split('Runtime capability metadata\n')[1].split('\n')[1])
+    metadata = json.loads(client.calls[-1][0]['content'].split('Runtime Bundles (metadata only)\n')[1])
+    body_result = json.loads(client.calls[-1][-1]['content'])
+    assert body_result['tool'] == 'apply_capability'
+    assert body_result['result']['skill_bodies'] == [{'skill_id': 'pdf', 'body': 'PDF_BODY_ONLY_SELECTED'}]
+    assert 'direct_skills' not in metadata
     if action == 'DIRECT':
-        assert metadata['direct_skills'] == ['pdf']
+        assert harness.state.direct_skills == {'pdf'}
+        assert len(metadata['maintained_bundles']) == 1
     elif action == 'EXTEND':
-        assert metadata['maintained_bundles'][0]['skill_ids'] == ['mail', 'pdf']
+        assert [m['skill_id'] for m in metadata['maintained_bundles'][0]['members']] == ['mail', 'pdf']
     else:
         assert len(metadata['maintained_bundles']) == 2
-        assert any(b['purpose'] == 'Document workflow' and b['skill_ids'] == ['pdf'] for b in metadata['maintained_bundles'])
+        assert any(b['purpose'] == 'Document workflow' and [m['skill_id'] for m in b['members']] == ['pdf'] for b in metadata['maintained_bundles'])
     assert agent.trace[0]['state_before'] == agent.trace[0]['state_after']
     assert agent.trace[1]['selected_skill_ids'] == ['pdf']
     assert agent.trace[1]['action'] == action
-    assert agent.trace[2]['injected_skill_ids'] == ['mail', 'pdf']
+    assert agent.trace[2]['history_skill_body_ids'] == ['pdf']
+    assert agent.trace[1]['appended_skill_body_ids'] == ['pdf']
+    assert all(row['system_skill_body_ids'] == [] for row in agent.trace)
     assert harness.pending_candidates is None
 
 
@@ -127,8 +135,9 @@ def test_multiple_loads_in_same_history_and_multiple_direct(harness):
     agent.run('follow-up task')
     assert client.calls[-1][1:-1] == previous_history
     assert client.calls[-1][-1]['content'] == 'follow-up task'
-    assert 'PDF_BODY_ONLY_SELECTED' in client.calls[-1][0]['content']
-    assert 'SLIDES_BODY_ONLY_SELECTED' in client.calls[-1][0]['content']
+    assert 'BODY_' not in client.calls[-1][0]['content']
+    assert 'PDF_BODY_ONLY_SELECTED' in json.dumps(client.calls[-1][1:])
+    assert 'SLIDES_BODY_ONLY_SELECTED' in json.dumps(client.calls[-1][1:])
     assert len(agent.trace) == 1
 
 
@@ -211,3 +220,63 @@ def test_empty_search_result_does_not_change_state(harness):
     with pytest.raises(ValueError, match='outside supplied'):
         harness.apply_capability(json.dumps({'action': 'DIRECT', 'skill_ids': ['pdf'], 'reason': 'x'}))
     assert not harness.loaded_skill_ids
+
+
+def test_bundle_surface_uses_only_member_metadata(harness):
+    from dataclasses import replace
+    record = harness.discovery.records['pdf']
+    harness.discovery.records['pdf'] = replace(
+        record, description='  extract\n PDF text  ' + 'detail ' * 100,
+        retrieval_representation='SECRET_CARD_USE_WHEN_CAPABILITIES_LEXICAL_CUES')
+    harness.state = RuntimeCapabilityState([
+        ActiveBundle('z', 'Documents', ('slides', 'pdf')),
+        ActiveBundle('a', 'Mail', ('mail',)),
+    ], {'hidden'})
+    surface = harness.render_bundle_context()
+    data = json.loads(surface)
+    assert list(data) == ['maintained_bundles']
+    assert [b['bundle_id'] for b in data['maintained_bundles']] == ['a', 'z']
+    members = data['maintained_bundles'][1]['members']
+    assert [m['skill_id'] for m in members] == ['pdf', 'slides']
+    assert members[0]['name'] == 'PDF'
+    assert members[0]['short_description'].startswith('extract PDF text detail')
+    assert len(members[0]['short_description']) == 240
+    assert 'SECRET_CARD' not in surface
+    assert 'BODY_' not in surface
+    assert 'hidden' not in surface
+    agent = ExperimentalSkillAgent(harness, ScriptedClient([FINAL]))
+    agent.run('Describe available workflows')
+    assert 'BODY_' not in json.dumps(agent.history)
+    assert 'BODY_' not in agent.render_system_context()
+
+
+def test_repeated_selection_appends_each_body_once_across_runs(harness):
+    client = ScriptedClient([
+        load(), apply(skill_ids=['pdf', 'pdf']), FINAL,
+        load(), apply('CREATE', purpose='Docs', skill_ids=['pdf', 'slides']), FINAL,
+        FINAL,
+    ])
+    agent = ExperimentalSkillAgent(harness, client)
+    agent.run('One-off PDF')
+    agent.run('Maintain document work')
+    agent.run('Use the earlier instructions again')
+    results = [json.loads(m['content'])['result'] for m in agent.history
+               if m['role'] == 'user' and m['content'].startswith('{')
+               and json.loads(m['content']).get('tool') == 'apply_capability']
+    assert results[1]['selected_skill_ids'] == ['pdf', 'slides']
+    assert results[1]['skill_bodies'] == [{'skill_id': 'slides', 'body': 'SLIDES_BODY_ONLY_SELECTED'}]
+    for marker in ('PDF_BODY_ONLY_SELECTED', 'SLIDES_BODY_ONLY_SELECTED'):
+        assert json.dumps(agent.history).count(marker) == 1
+        assert json.dumps(client.calls[-1][1:]).count(marker) == 1
+    assert all('BODY_' not in call[0]['content'] for call in client.calls)
+    assert 'HIDDEN_BODY_NEVER_VISIBLE' not in json.dumps(client.calls)
+    assert agent.trace[0]['history_skill_body_ids'] == ['pdf', 'slides']
+
+
+def test_harness_apply_returns_selected_bodies_only(harness):
+    harness.search_capability('PDF and presentation slides')
+    result = harness.apply_capability(json.dumps({
+        'action': 'DIRECT', 'skill_ids': ['pdf'], 'reason': 'one-off'}))
+    assert result == {'action': 'DIRECT', 'affected_bundle_id': None,
+                      'selected_skill_ids': ['pdf'],
+                      'skill_bodies': [{'skill_id': 'pdf', 'body': 'PDF_BODY_ONLY_SELECTED'}]}

@@ -1,6 +1,6 @@
 # Runtime Capability Harness
 
-For the single-model, same-history experiment with real Skill body injection,
+For the single-model, same-history experiment with Skill bodies delivered in history,
 see [Experimental Skill Agent](experimental-skill-agent.md). It uses separate
 search/apply stages; the combined resolver API documented below remains available.
 
