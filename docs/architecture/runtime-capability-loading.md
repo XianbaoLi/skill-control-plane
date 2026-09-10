@@ -1,125 +1,142 @@
-# Minimal runtime capability loading
+# Runtime Capability Harness
 
-The runtime expresses a capability need. Deterministic retrieval narrows skill
-and current active-bundle candidates; the existing API LLM decides how to organize
-the selected capabilities. This API has no historical REUSE action.
+The harness maintains the current capability state and renders the capability
+context for every LLM turn. The task LLM decides when its next step requires
+missing capabilities and calls `load_capability(need)`. Retrieval searches only
+the Skill library; the resolver organizes selected skills against **all** bundles
+maintained in the current runtime.
 
 ```text
-need ──→ SkillDiscovery (existing RetrievalCard / BM25 / optional Dense + RRF)
-     └─→ current active bundles (existing BM25 over purpose + member representations)
-                       ↓
-             LLMCapabilityResolver
-                       ↓ strict validation
-               DIRECT / EXTEND / CREATE
-                       ↓ atomic application
-              resulting runtime state
+RuntimeCapabilityState
+  → RuntimeCapabilityHarness.render_context()
+  → task LLM: direct skills + all maintained bundles + load_capability interface
+  → normal task execution; if next-step capabilities are missing:
+      load_capability(need)
+        → RuntimeCapabilityLoader
+        → SkillDiscovery: Retrieval Card / BM25 / optional Dense + RRF
+        → LLMCapabilityResolver:
+            need + skill candidates + representations/evidence
+            + all maintained bundles from current state
+        → strict validation: DIRECT / EXTEND / CREATE
+        → new RuntimeCapabilityState
+        → harness adopts successful result
+  → render_context() for the next task LLM turn
 ```
 
-## Entry point and compatibility
-
-Use `skill_control_plane.runtime.capability_loading`. The older
-`skill_control_plane.capability_loading` and package-root exports remain the
-previous V0.7 deterministic experiment, unchanged to preserve existing work and
-tests. They are not the entry point for this runtime design. Historical experiment
-reports have not been rewritten.
+## Entry point and host contract
 
 ```python
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.retrieval.discovery import SkillDiscovery
 from skill_control_plane.retrieval.cards import load_retrieval_cards
-from skill_control_plane.runtime.capability_loading import (
-    RuntimeCapabilityState, RuntimeCapabilityLoader, load_capability,
-)
+from skill_control_plane.runtime.capability_loading import RuntimeCapabilityLoader
+from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
 
 registry = SkillRegistry.from_tree(
     'local_artifacts/v0.5/hermes-current87',
     cards=load_retrieval_cards('local_artifacts/v0.5/retrieval-cards-v0.1-current87.jsonl'),
 )
-loader = RuntimeCapabilityLoader(SkillDiscovery(registry))
-state = RuntimeCapabilityState()
-result = load_capability('Read a PDF and make slides for this task', state, loader=loader)
-state = result.resulting_state
+harness = RuntimeCapabilityHarness(RuntimeCapabilityLoader(SkillDiscovery(registry)))
+context = harness.render_context()
+# Host includes context each turn and binds the tool to harness.load_capability.
+# The task LLM supplies this need only when the next step requires it:
+result = harness.load_capability('Extract text from a PDF and make presentation slides')
+next_context = harness.render_context()
+assert harness.state is result.resulting_state
 ```
 
-The default resolver directly instantiates the existing `BigModelChatClient`,
-using its existing `BIGMODEL_*` configuration. Tests inject the existing
-`TextCompleter` callable or a stub resolver; there is no new provider abstraction.
-SkillDiscovery builds its index once; callers can inject its existing dense
-factory. Default skill candidate depth is 10, active bundle depth 3. There is no
-additional required-skill pruning, new retrieval algorithm or coverage threshold.
+`render_context()` returns short instructions followed by compact JSON containing:
 
-## Runtime state and actions
+- `direct_skills`: current direct skill IDs;
+- `maintained_bundles`: every current bundle's `bundle_id`, `purpose`, `skill_ids`;
+- `tools`: the `load_capability` interface with a required string `need` parameter.
 
-`RuntimeCapabilityState` contains a list of immutable `ActiveBundle` records and
-a set of direct skill IDs. An ActiveBundle has an ID, purpose and skill IDs.
-Multiple bundles may coexist and share skills. Input state must refer to real
-registry skill IDs and contain unique bundle IDs and member IDs.
+The self-trigger rule asks the task LLM to call only when current capabilities
+cannot support the next step. `need` describes missing capability without guessing
+Skill or Bundle names. The harness never applies a deterministic trigger. The
+host is responsible for passing each rendered context to its task LLM and binding
+its tool calls; this layer does not implement a provider-specific task agent loop.
 
-- DIRECT adds one or more candidate skills to `direct_skills`, without changing
-  bundles. Cardinality does not determine the action.
-- EXTEND adds deduplicated candidate skills to one candidate active bundle.
-  It must add at least one new member. Other bundles and direct skills remain
-  unchanged.
-- CREATE allocates a runtime UUID bundle ID and adds a new bundle with the LLM's
-  purpose and selected skills. Existing bundles/direct skills remain unchanged.
+Rendering sorts direct IDs, bundles by ID, and member IDs, so equivalent states
+produce identical context irrespective of collection order. It performs no search
+or model call and does not expose registry contents, retrieval cards, or skill
+bodies. Capability JSON is labelled as data rather than instructions. The host's
+skill execution mechanism remains responsible for consuming loaded skills.
 
-Application returns a new state; the host explicitly adopts
-`result.resulting_state`. The supplied state is not mutated, including on errors.
-Results preserve need, retrieval candidates and representation evidence, bundle
-candidates, LLM attempts/decision/reason, affected bundle ID and resulting state.
-This resolves capability organization; it does not execute SKILL.md or contact
-email/GitHub on the user's behalf.
+Use the modules under `skill_control_plane.runtime.capability_*` for this design.
+The older `skill_control_plane.capability_loading`, package-root exports, and
+Shelf / `discovery_surface()` experiments remain for compatibility and are not
+used in this runtime call chain. Historical experiment reports remain unchanged.
 
-## Resolver boundary and validation
+## Retrieval and resolver boundary
 
-The model receives only need, Top-k skill candidates with their prepared
-representations/evidence and Top-n active bundles with purpose/current membership.
-It does not receive the entire registry, direct-skill surface, unrelated bundles
-or historical library. Input text is labelled untrusted data in the prompt.
+`SkillDiscovery` is unchanged: its index uses Retrieval Card representations (or
+existing metadata fallback), BM25, and optional Dense with RRF when a dense factory
+is supplied. Default skill candidate depth is 10. Loading performs one global
+Skill search, with no bundle search, bundle index, bundle ranking, or bundle Top-K.
+`BundleCandidate`, `discover_active_bundles`, and the `bundle_k` argument have been
+removed from this API.
 
-The model chooses a one-off direct capability surface, an extension of current
-context, or a new cluster worth maintaining. It may reject weak/alternative
-retrieval matches. The decision requires `action`, a non-empty array of candidate
-skill IDs and a non-empty `reason`; EXTEND additionally requires a candidate
-`target_bundle_id`; CREATE additionally requires a non-empty `purpose`. Unknown
-fields, unknown actions (including REUSE), invented IDs, out-of-candidate IDs,
-empty selections and no-op EXTEND are invalid. Duplicate skill selections are
-deduplicated before application. Stub resolver decisions are revalidated too.
+`resolve_capability(need, skill_candidates, runtime_state)` receives the discovery
+result, including candidate representation/evidence, and current state. Its prompt
+contains all maintained bundles as plain ID/purpose/member records, even when they
+have no lexical overlap with the need. Only retrieved Skill candidates and their
+representations are exposed, never the complete Skill library. Existing bundle
+members need not appear among candidates; newly selected skills must appear there.
 
-Malformed JSON/schema permits one repair call with the validation error. A
-second failure raises `ResolverError` with attempts and leaves state unchanged.
-Transport/provider errors propagate without being mistaken for schema repair.
-The existing chat adapter canonicalizes provider JSON before returning it; audit
-records label this as `adapter_response`, not original HTTP response bytes.
-If the adapter rejects malformed JSON before returning text, an attempt records
-that validation error without inventing missing raw text.
+The default resolver uses the existing `BigModelChatClient` and `BIGMODEL_*`
+configuration. Tests inject the existing `TextCompleter` or a stub resolver. There
+is no new provider abstraction, sufficiency pass, or required-skill pruning.
 
-## Validation and current limits
+## State, actions, and atomic application
 
-Ordinary pytest is network-free. Tests cover multi-skill DIRECT, CREATE alongside
-existing bundles, target-only EXTEND, multiple bundles, deduplication, scope-limited
-prompts, strict schema, invented/out-of-candidate IDs, one repair and provider
-failure with unchanged state.
+`RuntimeCapabilityState` contains `active_bundles` (the maintained runtime bundles)
+and `direct_skills`. Immutable `ActiveBundle` records contain ID, purpose and skill
+IDs. Bundles may coexist and share skills. State validation requires real registry
+skill IDs, unique bundle IDs, and unique member IDs.
 
-Run the separate live acceptance with the existing environment:
+- DIRECT adds one or more candidate skills to direct skills without maintaining
+  them in a bundle. Skill count does not decide the action.
+- EXTEND adds selected candidate skills to any existing maintained bundle. Its
+  target must exist in current state and it must add at least one new member.
+- CREATE allocates a runtime UUID bundle ID and records a non-empty reusable
+  purpose and selected candidate skills.
+
+All actions preserve other bundles and direct skills. Duplicate selections are
+deduplicated. Unknown actions, extra fields, duplicate JSON keys, invented or
+out-of-candidate skill IDs, invalid targets, empty selections/purposes/reasons,
+and no-op EXTEND fail validation. Custom resolver decisions are revalidated before
+application. Application constructs a new state without mutating the supplied
+state; the harness adopts it only after a successful load. Direct loader callers
+can still explicitly adopt `result.resulting_state`.
+
+Malformed JSON/schema permits one repair call. A second failure raises
+`ResolverError` with attempts. Provider/transport exceptions propagate; empty
+candidate results fail explicitly. These failures preserve the state and next
+rendered context. Load results retain need, skill retrieval/evidence, the full
+input `maintained_bundles` snapshot, resolver attempts/decision, affected bundle
+ID, and resulting state. The existing adapter may canonicalize provider JSON;
+recorded responses are adapter output, not original HTTP response bytes.
+
+## Verification and boundaries
+
+Network-free pytest covers stable and library-scoped context, empty initial state,
+all maintained bundles beyond the former Top-K, evidence in resolver input,
+non-lexical EXTEND targets, multi-skill DIRECT, CREATE, EXTEND, turn-to-turn context
+updates, strict validation, one repair, and unchanged state/context on failure.
 
 ```bash
-set -a
-source .env
-set +a
-PYTHONPATH=src .venv/bin/python scripts/capability_loading_e2e.py
+PYTHONPATH=src .venv/bin/python -m pytest tests/test_runtime_capability_loading.py -q
+PYTHONPATH=src .venv/bin/python -m pytest -q
 ```
 
-It validates the frozen current87 manifest/cards, attempts existing Dense/RRF
-with copied embedding cache, falls back explicitly to real BM25 if Dense fails,
-and makes three actual chat requests. Unique local output directories preserve
-previous runs. A non-successful case makes the runner exit nonzero. No fixture
-injects candidates or decisions. The current recorded run had HTTP 429 for all
-three resolver requests and Dense, so live resolver semantics remain unverified.
+The separate `scripts/capability_loading_e2e.py` remains an opt-in live resolver
+acceptance script using the frozen current87 registry/cards and configured Dense
+provider plus RRF. It aborts on Dense preflight failure and reports all maintained
+bundles; live calls are not part of ordinary pytest.
 
-Lexical bundle narrowing may admit unrelated bundles through common words or
-miss paraphrases. The LLM must assess relevance, but a valid schema does not prove
-semantic correctness. The distinction between a one-off task and a maintained
-cluster can be ambiguous unless the need supplies duration/context. Persistent
-storage, historical reuse, templates, lifecycle, learning, embeddings for bundles,
-automatic merging, execution, OpenPI integration and triggers are out of scope.
+Self-trigger behavior is specified in the context; actual task-model judgment is
+not guaranteed by schema validation. This minimal harness does not execute skills
+or external actions. Bundle retrieval, sufficiency re-retrieval, deterministic
+hard triggers, Pi/OpenPI integration, bundle eviction/merge/long-term lifecycle,
+persistence and concurrent state coordination are outside this implementation.

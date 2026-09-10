@@ -8,7 +8,7 @@ from skill_control_plane.retrieval.discovery import SkillDiscovery
 from skill_control_plane.runtime.capability_loading import (
     ActiveBundle, CapabilityDecision, LLMCapabilityResolver, ResolverError,
     ResolverResult, RuntimeCapabilityLoader, RuntimeCapabilityState,
-    build_resolver_prompt, discover_active_bundles, validate_decision,
+    build_resolver_prompt, validate_decision,
 )
 
 
@@ -125,10 +125,9 @@ def test_prompt_only_contains_narrowed_context(discovery):
         ActiveBundle('private-mail', 'mail', ('email',)),
     ])
     skills = discovery.discover_skills('GitHub Actions', k=2)
-    bundles = discover_active_bundles('GitHub Actions', state, discovery, n=1)
-    assert bundles[0].bundle_id == 'review'
-    prompt = build_resolver_prompt('GitHub Actions', skills, bundles)
-    assert 'private-mail' not in prompt and 'unrelated astronomy' not in prompt
+    prompt = build_resolver_prompt('GitHub Actions', skills, state)
+    assert 'private-mail' in prompt and 'review' in prompt
+    assert 'unrelated astronomy' not in prompt
     assert 'one OR MORE' in prompt
     assert 'fixed coverage threshold' in prompt
 
@@ -142,22 +141,22 @@ def test_prompt_only_contains_narrowed_context(discovery):
 ])
 def test_strict_schema(discovery, raw):
     with pytest.raises(ValueError):
-        validate_decision(raw, discovery.discover_skills('PDF'), (), RuntimeCapabilityState())
+        validate_decision(raw, discovery.discover_skills('PDF'), RuntimeCapabilityState())
 
 
-def test_existing_but_non_candidate_bundle_rejected(discovery):
+def test_existing_bundle_without_lexical_match_can_be_extended(discovery):
     state = RuntimeCapabilityState([ActiveBundle('email', 'mail', ('email',))])
     raw = '{"action":"EXTEND","target_bundle_id":"email","skill_ids":["pdf"],"reason":"x"}'
-    with pytest.raises(ValueError, match='outside supplied'):
-        validate_decision(raw, discovery.discover_skills('PDF'), (), state)
+    decision = validate_decision(raw, discovery.discover_skills('PDF'), state)
+    result = run(discovery, state, decision, 'PDF')
+    assert result.resulting_state.active_bundles[0].skill_ids == ('email', 'pdf')
 
 
 def test_extend_requires_new_skill(discovery):
     state = RuntimeCapabilityState([ActiveBundle('review', 'GitHub review', ('github-actions',))])
-    bundles = discover_active_bundles('GitHub Actions', state, discovery)
     with pytest.raises(ValueError, match='new skill'):
         validate_decision(json.dumps({'action':'EXTEND','target_bundle_id':'review',
-            'skill_ids':['github-actions'],'reason':'x'}), discovery.discover_skills('GitHub Actions'), bundles, state)
+            'skill_ids':['github-actions'],'reason':'x'}), discovery.discover_skills('GitHub Actions'), state)
 
 
 def test_default_resolver_reuses_existing_client(monkeypatch):
@@ -175,3 +174,108 @@ def test_create_can_coexist_with_existing_bundle(discovery):
     assert result.resulting_state.active_bundles[0] is github
     assert result.resulting_state.direct_skills == {'pdf'}
     assert state.active_bundles == [github]
+
+
+def context_data(harness):
+    return json.loads(harness.render_context().split('\n', 1)[1])
+
+
+def test_harness_stable_compact_context_without_library(discovery, monkeypatch):
+    from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
+    bundles = [ActiveBundle('z', 'Mail operations', ('email', 'pdf')),
+               ActiveBundle('a', 'Code review', ('github',))]
+    loader = RuntimeCapabilityLoader(discovery, StubResolver(None))
+    def unexpected_search(*args, **kwargs):
+        pytest.fail('rendering must not perform retrieval')
+    monkeypatch.setattr(discovery, 'discover_skills', unexpected_search)
+    harness = RuntimeCapabilityHarness(loader, RuntimeCapabilityState(bundles, {'pdf', 'slides'}))
+    reordered = RuntimeCapabilityHarness(loader, RuntimeCapabilityState([
+        bundles[1], ActiveBundle('z', 'Mail operations', ('pdf', 'email')),
+    ], {'slides', 'pdf'}))
+    assert harness.render_context() == reordered.render_context()
+    data = context_data(harness)
+    assert data['direct_skills'] == ['pdf', 'slides']
+    assert data['maintained_bundles'] == [
+        {'bundle_id': 'a', 'purpose': 'Code review', 'skill_ids': ['github']},
+        {'bundle_id': 'z', 'purpose': 'Mail operations', 'skill_ids': ['email', 'pdf']},
+    ]
+    tool = data['tools'][0]
+    assert tool['name'] == 'load_capability'
+    assert tool['parameters']['required'] == ['need']
+    assert 'load_capability(need)' in harness.render_context()
+    assert 'only when current capabilities are insufficient' in harness.render_context()
+    assert 'do not guess Skill names or Bundle names' in harness.render_context()
+    assert 'hidden' not in harness.render_context()
+    assert 'unrelated astronomy' not in harness.render_context()
+    assert 'GitHub pull request review' not in harness.render_context()
+
+
+def test_harness_turn_to_turn_direct_create_extend(discovery):
+    from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
+    prompts = []
+    def complete(prompt):
+        prompts.append(json.loads(prompt.split('Input:\n', 1)[1]))
+        if len(prompts) == 1:
+            return json.dumps({'action': 'DIRECT', 'skill_ids': ['pdf', 'slides'], 'reason': 'one-off'})
+        if len(prompts) == 2:
+            return json.dumps({'action': 'CREATE', 'skill_ids': ['github'], 'reason': 'ongoing', 'purpose': 'Review code'})
+        return json.dumps({'action': 'EXTEND', 'skill_ids': ['github-actions'],
+                           'reason': 'check CI', 'target_bundle_id': prompts[-1]['maintained_bundles'][0]['bundle_id']})
+    harness = RuntimeCapabilityHarness(RuntimeCapabilityLoader(discovery, LLMCapabilityResolver(complete)))
+    assert context_data(harness)['direct_skills'] == []
+    assert context_data(harness)['maintained_bundles'] == []
+    harness.load_capability('extract PDF text and presentation slides')
+    assert context_data(harness)['direct_skills'] == ['pdf', 'slides']
+    assert context_data(harness)['maintained_bundles'] == []
+    created = harness.load_capability('GitHub pull request review')
+    bundle_id = created.affected_bundle_id
+    assert context_data(harness)['maintained_bundles'] == [
+        {'bundle_id': bundle_id, 'purpose': 'Review code', 'skill_ids': ['github']}]
+    harness.load_capability('GitHub Actions CI failure')
+    assert context_data(harness)['maintained_bundles'][0]['skill_ids'] == ['github', 'github-actions']
+    assert context_data(harness)['direct_skills'] == ['pdf', 'slides']
+    assert created.resulting_state.active_bundles[0].skill_ids == ('github',)
+    assert prompts[-1]['maintained_bundles'][0]['bundle_id'] == bundle_id
+
+
+def test_resolver_receives_all_maintained_bundles_and_skill_evidence(discovery, monkeypatch):
+    state = RuntimeCapabilityState([
+        ActiveBundle(f'mail-{i}', f'Mail workflow {i}', ('email',)) for i in range(6)
+    ])
+    calls = []
+    original = discovery.discover_skills
+    def search(need, k):
+        calls.append((need, k))
+        return original(need, k)
+    monkeypatch.setattr(discovery, 'discover_skills', search)
+    def complete(prompt):
+        data = json.loads(prompt.split('Input:\n', 1)[1])
+        assert data['need'] == 'extract PDF text'
+        assert len(data['maintained_bundles']) == 6
+        assert data['maintained_bundles'][-1]['bundle_id'] == 'mail-5'
+        assert data['representations']['pdf'] == discovery.texts['pdf']
+        assert all('evidence' in c for c in data['skill_candidates'])
+        return json.dumps({'action': 'EXTEND', 'target_bundle_id': 'mail-5',
+                           'skill_ids': ['pdf'], 'reason': 'Process attachments'})
+    result = RuntimeCapabilityLoader(discovery, LLMCapabilityResolver(complete)).load_capability('extract PDF text', state)
+    assert calls == [('extract PDF text', 10)]
+    assert result.maintained_bundles == tuple(state.active_bundles)
+    assert result.resulting_state.active_bundles[-1].skill_ids == ('email', 'pdf')
+
+
+@pytest.mark.parametrize('failure', ['validation', 'provider', 'empty', 'blank'])
+def test_harness_failure_preserves_state_and_context(discovery, failure):
+    from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
+    def complete(prompt):
+        if failure == 'provider':
+            raise RuntimeError('provider unavailable')
+        return '{}'
+    initial = RuntimeCapabilityState([ActiveBundle('mail', 'Manage mail', ('email',))], {'slides'})
+    harness = RuntimeCapabilityHarness(RuntimeCapabilityLoader(discovery, LLMCapabilityResolver(complete)), initial)
+    before = harness.render_context()
+    need = {'empty': 'zzzznonexistent', 'blank': ' '}.get(failure, 'PDF')
+    with pytest.raises((ValueError, RuntimeError)):
+        harness.load_capability(need)
+    assert harness.state is initial
+    assert harness.render_context() == before
+    assert initial == RuntimeCapabilityState([ActiveBundle('mail', 'Manage mail', ('email',))], {'slides'})

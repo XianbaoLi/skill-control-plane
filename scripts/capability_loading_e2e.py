@@ -18,7 +18,7 @@ from skill_control_plane.retrieval.cards import load_retrieval_cards
 from skill_control_plane.retrieval.discovery import SkillDiscovery
 from skill_control_plane.runtime.capability_loading import (
     ActiveBundle, LLMCapabilityResolver, ResolverError, RuntimeCapabilityLoader,
-    RuntimeCapabilityState, discover_active_bundles,
+    RuntimeCapabilityState,
 )
 
 ROOT = Path('local_artifacts/v0.5/hermes-current87')
@@ -78,9 +78,8 @@ def main():
             ActiveBundle('github-review', 'Review and inspect GitHub pull requests',
                          ('github-code-review', 'github-auth'))])
         preview = discovery.discover_skills(need, k=10)
-        bundles = discover_active_bundles(need, state, discovery)
         row = {'intended': intended, 'need': need, 'initial_state': asdict(state),
-               'skill_candidates': asdict(preview), 'bundle_candidates': [asdict(b) for b in bundles],
+               'skill_candidates': asdict(preview), 'maintained_bundles': [asdict(b) for b in state.active_bundles],
                'api_calls': []}
         def complete(prompt):
             call = {'prompt': prompt}
