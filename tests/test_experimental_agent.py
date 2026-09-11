@@ -112,15 +112,20 @@ def test_invalid_native_application_preserves_state_and_pairs_error_result(harne
     assert 'BODY_' not in json.dumps(agent.history)
 
 
-def test_only_latest_candidates_and_single_use(harness):
-    harness.search_capability('PDF')
-    harness.search_capability('email inbox')
-    decision = {'action': 'DIRECT', 'skill_ids': ['pdf'], 'reason': 'x'}
-    with pytest.raises(ValueError, match='outside supplied'):
-        harness.apply_capability(json.dumps(decision))
-    decision['skill_ids'] = ['mail']
+def test_merged_candidates_and_single_use(harness):
+    first = harness.search_capability('PDF')
+    second = harness.search_capability('email inbox')
+    assert [c.skill_id for c in first.candidates] == ['pdf']
+    assert [c.skill_id for c in second.candidates] == ['mail']
+    assert {c.skill_id for c in harness.pending_candidates.candidates} == {'pdf', 'mail'}
+    decision = {'action': 'DIRECT', 'skill_ids': ['pdf', 'mail'], 'reason': 'x'}
     harness.apply_capability(json.dumps(decision))
+    assert harness.state.direct_skills == {'pdf', 'mail'}
+    assert harness.pending_candidates is None
     with pytest.raises(ValueError, match='fresh'):
+        harness.apply_capability(json.dumps(decision))
+    harness.search_capability('slides')
+    with pytest.raises(ValueError, match='outside supplied'):
         harness.apply_capability(json.dumps(decision))
 
 
@@ -221,14 +226,15 @@ def test_no_independent_resolver_or_combined_loader(harness, monkeypatch):
     ExperimentalSkillAgent(harness, ScriptedClient([load(), apply(), FINAL])).run('task')
 
 
-def test_failed_new_search_invalidates_previous_candidates(harness, monkeypatch):
-    harness.search_capability('PDF')
+def test_failed_new_search_preserves_previous_candidates(harness, monkeypatch):
+    previous = harness.search_capability('PDF')
     def fail(*args, **kwargs):
         raise RuntimeError('dense failure')
     monkeypatch.setattr(harness.discovery, 'discover_skills', fail)
     with pytest.raises(RuntimeError):
         harness.search_capability('email')
-    assert harness.pending_candidates is None
+    assert harness.pending_candidates is previous
+    harness.apply_capability(json.dumps({'action': 'DIRECT', 'skill_ids': ['pdf'], 'reason': 'x'}))
 
 
 def test_empty_search_cannot_apply(harness):
@@ -280,3 +286,104 @@ def test_duplicate_call_ids_rejected_before_history_append(harness):
     with pytest.raises(ValueError, match='duplicate'):
         agent.run('task')
     assert len(agent.history) == 1
+
+
+def test_native_schema_required_fields_and_action_enum():
+    schema = CAPABILITY_TOOLS[1]['function']['parameters']
+    assert set(schema['required']) == {'action', 'skill_ids', 'reason'}
+    assert schema['properties']['action']['enum'] == ['DIRECT', 'EXTEND', 'CREATE']
+    assert {'target_bundle_id', 'purpose'} <= schema['properties'].keys()
+
+
+@pytest.mark.parametrize('bad', [apply(skill_ids=['invented']), apply('CREATE', purpose=''),
+                               apply('EXTEND', target_bundle_id='missing')])
+def test_multi_search_retry_and_search_local_history(harness, bad):
+    before = deepcopy(harness.state)
+    def retry(messages):
+        assert harness.state == before
+        assert {c.skill_id for c in harness.pending_candidates.candidates} == {'pdf', 'mail'}
+        assert 'error' in json.loads(messages[-1]['content'])
+        searches = [json.loads(m['content']) for m in messages if m['role'] == 'tool'][:2]
+        assert [[c['skill_id'] for c in r['candidates']] for r in searches] == [['pdf'], ['mail']]
+        return apply(skill_ids=['pdf', 'mail'])
+    agent = ExperimentalSkillAgent(harness, ScriptedClient([
+        load('PDF'), load('email inbox'), bad, retry, FINAL]))
+    agent.run('two capabilities')
+    assert harness.state.direct_skills == {'pdf', 'mail'}
+    assert agent.trace[2]['pending_pool_before'] == agent.trace[2]['pending_pool_after'] == ['pdf', 'mail']
+    assert agent.trace[3]['pending_pool_after'] == []
+
+
+def test_final_discards_uncommitted_pool(harness):
+    agent = ExperimentalSkillAgent(harness, ScriptedClient([load('PDF'), FINAL, apply(), FINAL]))
+    agent.run('search only')
+    assert agent.trace[-1]['pending_pool_before'] == ['pdf']
+    assert agent.trace[-1]['pending_pool_after'] == []
+    assert harness.pending_candidates is None
+    agent.run('try stale candidate')
+    assert agent.trace[0]['tool_error']['type'] == 'ValueError'
+    assert not harness.loaded_skill_ids
+
+
+def test_new_turn_discards_pool_left_by_interrupted_turn(harness):
+    agent = ExperimentalSkillAgent(harness, ScriptedClient([load('PDF'), apply()]), max_steps=1)
+    with pytest.raises(AgentStepLimitError):
+        agent.run('interrupted')
+    assert harness.pending_candidates is not None
+    with pytest.raises(AgentStepLimitError):
+        agent.run('new turn')
+    assert agent.trace[0]['pending_pool_before'] == []
+    assert agent.trace[0]['tool_error']['type'] == 'ValueError'
+    assert not harness.loaded_skill_ids
+
+
+def test_pool_merge_deduplicates_and_preserves_representations(harness):
+    harness.search_capability('PDF')
+    harness.search_capability('PDF presentation slides')
+    pending = harness.pending_candidates
+    assert [c.skill_id for c in pending.candidates].count('pdf') == 1
+    assert set(dict(pending.representations)) == {c.skill_id for c in pending.candidates}
+
+
+def test_second_search_provider_failure_can_recover_in_same_agent(harness, monkeypatch):
+    discover = harness.discovery.discover_skills
+    def search(need, **kwargs):
+        if need == 'email':
+            raise RuntimeError('dense failure')
+        return discover(need, **kwargs)
+    monkeypatch.setattr(harness.discovery, 'discover_skills', search)
+    agent = ExperimentalSkillAgent(harness, ScriptedClient([
+        load('PDF'), load('email'), apply(), FINAL]))
+    agent.run('task')
+    assert agent.trace[1]['pending_pool_before'] == agent.trace[1]['pending_pool_after'] == ['pdf']
+    assert agent.trace[1]['state_before'] == agent.trace[1]['state_after']
+    assert agent.trace[1]['tool_error']['type'] == 'RuntimeError'
+    assert harness.state.direct_skills == {'pdf'}
+
+
+def test_missing_reason_preserves_pool_for_retry(harness):
+    missing = tool('apply_capability', {'action': 'DIRECT', 'skill_ids': ['pdf']})
+    agent = ExperimentalSkillAgent(harness, ScriptedClient([load('PDF'), missing, apply(), FINAL]))
+    agent.run('task')
+    assert agent.trace[1]['tool_error']['type'] == 'ValueError'
+    assert agent.trace[1]['state_before'] == agent.trace[1]['state_after']
+    assert agent.trace[1]['pending_pool_before'] == agent.trace[1]['pending_pool_after'] == ['pdf']
+    assert harness.state.direct_skills == {'pdf'}
+
+
+@pytest.mark.parametrize('queries,ids,expected', [
+    (['PDF', 'email'], ['pdf', 'mail'], True),
+    (['PDF', 'PDF'], ['pdf'], False),
+    (['PDF', 'email'], ['mail'], False),
+])
+def test_live_multi_search_audit_requires_joint_exclusive_selection(harness, queries, ids, expected):
+    from importlib.util import spec_from_file_location, module_from_spec
+    from pathlib import Path
+    spec = spec_from_file_location('live_agent_e2e', Path(__file__).parents[1] /
+                                   'scripts/experimental_skill_agent_e2e.py')
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    agent = ExperimentalSkillAgent(harness, ScriptedClient([
+        *[load(q) for q in queries], apply(skill_ids=ids), FINAL]))
+    agent.run('task')
+    assert module.audit_multi_search(agent)['passed'] is expected

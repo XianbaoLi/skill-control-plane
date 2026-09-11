@@ -28,6 +28,51 @@ DEFAULT_TASK = (
 )
 
 
+MULTI_SEARCH_TASK = (
+    '请为一次性项目交接准备两部分操作方案：一是从扫描 PDF 中提取文字和表格并验证识别质量；'
+    '二是排查 GitHub Python 项目中仅在 CI 出现的间歇性测试失败，涵盖读取 PR 差异与日志、'
+    '复现、根因定位和修复验证。两部分都必须依据本环境实际可用的操作说明，不猜命令。'
+    '本次请分开检索这两个明显不同的能力缺口：先调用一次 load_capability 搜索文档识别能力，'
+    '读完结果后，再调用一次 load_capability 搜索 CI 调试能力；读完两次结果后，再用一次 '
+    'apply_capability 联合选择支持两部分工作的 Skill。查询和候选选择由你决定。'
+    '当前没有文件或外部访问权限，只给方案，不执行；回答控制在 800 字内。'
+)
+
+
+def audit_multi_search(agent):
+    """Require a real sequential search/search/apply and exclusive selections.
+
+    Pure observation after execution: no forced calls, IDs or runtime policy.
+    """
+    events = []
+    for row in agent.trace:
+        transitions = {t['tool_call_id']: t for t in row.get('pending_pool_transitions', [])}
+        for event in row['tool_executions']:
+            result = next(json.loads(m['content']) for m in agent.history
+                          if m['role'] == 'tool' and m['tool_call_id'] == event['tool_call_id'])
+            events.append({**event, 'step': row['step'], 'result': result,
+                           'pool': transitions[event['tool_call_id']]})
+    searches = [e for e in events if e['tool'] == 'load_capability' and 'candidates' in e['result']]
+    applications = [e for e in events if e['tool'] == 'apply_capability' and 'error' not in e['result']]
+    checks = {'two_successful_searches': len(searches) == 2,
+              'one_successful_apply': len(applications) == 1,
+              'no_protocol_or_tool_errors': not any(r.get('error') or r.get('tool_error') for r in agent.trace),
+              'pool_empty_at_end': agent.harness.pending_candidates is None}
+    if len(searches) == 2 and len(applications) == 1:
+        first, second = [{c['skill_id'] for c in e['result']['candidates']} for e in searches]
+        application = applications[0]
+        selected = set(application['result']['selected_skill_ids'])
+        checks.update(
+            sequential_search_search_apply=searches[0]['step'] < searches[1]['step'] < application['step'],
+            selected_first_exclusive=bool(selected & (first - second)),
+            selected_second_exclusive=bool(selected & (second - first)),
+            selection_within_union=selected <= first | second,
+            second_search_preserves_first=set(searches[1]['pool']['after']) == first | second,
+            apply_pool_before=set(application['pool']['before']) == first | second,
+            apply_clears_pool=application['pool']['after'] == [])
+    return {'checks': checks, 'passed': all(checks.values()), 'events': events}
+
+
 def audit_context_flow(calls, records):
     """Check actual wire messages, independently of the agent's trace counters."""
     audits = []
@@ -99,7 +144,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--task', default=DEFAULT_TASK)
     parser.add_argument('--max-steps', type=int, default=8)
+    parser.add_argument('--multi-search', action='store_true', help='Run and audit the two-capability live case')
     args = parser.parse_args()
+    if args.multi_search:
+        args.task = MULTI_SEARCH_TASK
     base = Path('local_artifacts/experimental-skill-agent')
     base.mkdir(parents=True, exist_ok=True)
     output = Path(mkdtemp(prefix='live-', dir=base)) / 'trace.json'
@@ -155,6 +203,10 @@ def main():
             set(applied['selected_skill_ids']) <= set(later['history_skill_body_ids'])
             for applied in applications for later in report['context_audit'] if later['call'] > applied['step'])
         report['status'] = 'success' if search_steps and applications and injected_later else 'incomplete_capability_cycle'
+        if args.multi_search:
+            report['multi_search_audit'] = audit_multi_search(agent)
+            if not report['multi_search_audit']['passed']:
+                report['status'] = 'multi_search_expectation_mismatch'
     except Exception as exc:
         chain, current = [], exc
         while current is not None:

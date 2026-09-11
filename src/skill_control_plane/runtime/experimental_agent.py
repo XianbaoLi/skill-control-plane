@@ -24,7 +24,7 @@ CAPABILITY_TOOLS = [
             'required': ['need'], 'additionalProperties': False}}},
     {'type': 'function', 'function': {
         'name': 'apply_capability',
-        'description': 'Organize selected candidates from the latest search. EXTEND requires an existing target and a new member; CREATE requires purpose.',
+        'description': 'Organize selected candidates from uncommitted searches in this user turn. EXTEND requires an existing target and a new member; CREATE requires purpose.',
         'parameters': {'type': 'object', 'properties': {
             'action': {'type': 'string', 'enum': ['DIRECT', 'EXTEND', 'CREATE']},
             'skill_ids': {'type': 'array', 'minItems': 1, 'items': {'type': 'string'}},
@@ -43,8 +43,10 @@ form a new CREATE bundle. Do not load skills merely because they might be useful
 
 Use the provided function tools when needed. Otherwise answer the user normally.
 load_capability only searches; it does not load instructions or change state.
-Read its result before calling apply_capability. Use only the latest search's
-candidate skill IDs. DIRECT may select multiple skills for a one-off need.
+Read each result before calling apply_capability. You may search again when
+another capability is needed. Select only candidate skill IDs retrieved in this
+user turn since the last successful apply. Successful apply consumes that pool;
+failed apply preserves it for correction. DIRECT may select multiple skills for a one-off need.
 EXTEND must add at least one new skill to a current maintained bundle.
 CREATE maintains a new capability cluster with a reusable purpose. Skill count
 and retrieval rank do not decide the action. Select relevant candidates only.
@@ -81,6 +83,10 @@ class ExperimentalSkillAgent:
         data = asdict(self.harness.state)
         data['direct_skills'] = sorted(data['direct_skills'])
         return data
+
+    def _pending_snapshot(self) -> list[str]:
+        pending = self.harness.pending_candidates
+        return [c.skill_id for c in pending.candidates] if pending is not None else []
 
     def _tool_result(self, tool_call_id: str, result: dict) -> None:
         self.history.append({'role': 'tool', 'tool_call_id': tool_call_id,
@@ -125,6 +131,7 @@ class ExperimentalSkillAgent:
                 'retrieved_skill_ids': [c.skill_id for c in pending.candidates] if pending else [],
                 'selected_skill_ids': [], 'action': None,
                 'state_before': self._state_snapshot(), 'system_skill_body_ids': [],
+                'pending_pool_before': self._pending_snapshot(),
                 'history_skill_body_ids': sorted(self._history_skill_ids),
                 'appended_skill_body_ids': [],
             }
@@ -155,8 +162,12 @@ class ExperimentalSkillAgent:
                     content = message.get('content')
                     if not isinstance(content, str) or not content.strip():
                         raise ValueError('assistant message has no content or tool calls')
+                    self.harness.pending_candidates = None
                     return content
                 for index, call in enumerate(calls):
+                    pool_transition = {'tool_call_id': call['id'],
+                                       'before': self._pending_snapshot()}
+                    row.setdefault('pending_pool_transitions', []).append(pool_transition)
                     try:
                         result = self._execute_tool(call, row)
                     except Exception as exc:
@@ -169,6 +180,8 @@ class ExperimentalSkillAgent:
                             self._tool_result(remaining['id'], {'error': {'type': 'NotExecuted'}})
                         row['tool_error'] = {'type': type(exc).__name__}
                         break
+                    finally:
+                        pool_transition['after'] = self._pending_snapshot()
                     self._tool_result(call['id'], result)
                     appended = [b['skill_id'] for b in result.get('skill_bodies', [])]
                     row['appended_skill_body_ids'].extend(appended)
@@ -177,6 +190,7 @@ class ExperimentalSkillAgent:
                 row['error'] = {'type': type(exc).__name__}
                 raise
             finally:
+                row['pending_pool_after'] = self._pending_snapshot()
                 row['state_after'] = self._state_snapshot()
                 row['history_skill_body_ids_after'] = sorted(self._history_skill_ids)
         self.trace[-1]['error'] = {'type': 'AgentStepLimitError'}

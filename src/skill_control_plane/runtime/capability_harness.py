@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 from skill_control_plane.retrieval.discovery import SkillDiscovery, SkillDiscoveryResult
 from .capability_loading import (
@@ -50,14 +50,25 @@ class RuntimeCapabilityHarness:
 
     def search_capability(self, need: str, *, k: int = 10) -> SkillDiscoveryResult:
         """Agent load_capability stage: search only, never call a resolver."""
-        self.pending_candidates = None
         validate_state(self.state, self.discovery)
         candidates = self.discovery.discover_skills(need, k=k)
-        self.pending_candidates = candidates
+        # Only publish a merged pool after successful retrieval. The returned
+        # result stays search-local; history already contains earlier results.
+        previous = self.pending_candidates
+        if previous is None:
+            self.pending_candidates = candidates
+        else:
+            merged = {c.skill_id: c for c in previous.candidates}
+            merged.update((c.skill_id, c) for c in candidates.candidates)
+            representations = dict(previous.representations)
+            representations.update(candidates.representations)
+            self.pending_candidates = replace(
+                candidates, candidates=tuple(merged.values()),
+                representations=tuple(representations.items()))
         return candidates
 
     def apply_capability(self, raw_decision: str) -> dict:
-        """Apply against the latest search only; consume it after success."""
+        """Apply against this turn's uncommitted search pool; consume on success."""
         if self.pending_candidates is None:
             raise ValueError('apply_capability requires a fresh load_capability result')
         validate_state(self.state, self.discovery)
