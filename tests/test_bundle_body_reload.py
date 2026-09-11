@@ -146,20 +146,26 @@ def test_same_agent_second_turn_exact_reload_has_zero_retrieval(harness, monkeyp
         })
 
     def reload_from_evicted_bundle(messages):
-        assert ('Authoritative evicted Bundle Skill IDs (reload before use): '
+        assert ('Authoritative evicted Bundle Skill IDs: '
                 '["powerpoint"]') in messages[0]['content']
         surface = json.loads(messages[0]['content'].split(
             'Runtime Bundles (metadata only)\n', 1)[1])
         member = surface['maintained_bundles'][0]['members'][0]
         assert member['skill_id'] == 'powerpoint'
         assert member['body_state'] == 'evicted'
+        assert 'FULL_POWERPOINT_SKILL_BODY' not in json.dumps(messages)
+        assert 'FULL_POWERPOINT_SKILL_BODY' in json.dumps(agent.history)
         return tool('load_skill_body', {'skill_id': member['skill_id']})
+
+    def finish_after_reload(messages):
+        assert json.dumps(messages).count('FULL_POWERPOINT_SKILL_BODY') == 1
+        return {'role': 'assistant', 'content': 'Third slide revised.'}
 
     client = ScriptedClient([
         tool('load_capability', {'need': 'read a document and create presentation slides'}),
         apply_from_candidates, {'role': 'assistant', 'content': 'PPT created.'},
         reload_from_evicted_bundle,
-        {'role': 'assistant', 'content': 'Third slide revised.'},
+        finish_after_reload,
     ])
     retrieval_count = body_count = 0
     discover = harness.discovery.discover_skills
@@ -191,6 +197,11 @@ def test_same_agent_second_turn_exact_reload_has_zero_retrieval(harness, monkeyp
     assert harness.state.active_bundles == bundle_before
     assert [event['tool'] for row in agent.trace
             for event in row['tool_executions']] == ['load_skill_body']
+    assert agent.trace[0]['canonical_body_ids'] == ['powerpoint']
+    assert agent.trace[0]['model_visible_body_ids'] == []
+    assert agent.trace[0]['redacted_body_ids'] == ['powerpoint']
+    assert agent.trace[1]['model_visible_body_ids'] == ['powerpoint']
+    assert agent.trace[1]['redacted_body_ids'] == ['powerpoint']
     reload_result = json.loads(agent.history[-2]['content'])
     assert reload_result['body'] == 'FULL_POWERPOINT_SKILL_BODY'
     assert reload_result['status'] == 'loaded'

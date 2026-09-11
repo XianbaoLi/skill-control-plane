@@ -85,7 +85,10 @@ def audit_context_flow(calls, records):
         surface = json.loads(system.split('Runtime Bundles (metadata only)\n', 1)[1])
         assert set(surface) == {'maintained_bundles'}
         for bundle in surface['maintained_bundles']:
-            assert set(bundle) == {'bundle_id', 'purpose', 'members'}
+            assert set(bundle) == {'bundle_id', 'purpose', 'capabilities', 'members'}
+            assert len(bundle['capabilities']) <= 8
+            assert all(isinstance(phrase, str) and len(phrase) <= 120
+                       for phrase in bundle['capabilities'])
             for member in bundle['members']:
                 assert set(member) == {'skill_id', 'name', 'short_description',
                                        'body_state'}

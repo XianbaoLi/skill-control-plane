@@ -42,6 +42,11 @@ class SkillDiscovery:
 
         return self.registry.load_skill_body(skill_id)
 
+    def capability_phrases(self, skill_id: str) -> tuple[str, ...]:
+        """Expose offline structured coverage metadata without searching."""
+
+        return self.registry.capability_phrases(skill_id)
+
     def discover_skills(self, query: str, k: int = 5) -> SkillDiscoveryResult:
         if not query.strip() or k < 1:
             raise ValueError("query must be non-empty and k must be positive")

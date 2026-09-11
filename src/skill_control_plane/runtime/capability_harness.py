@@ -36,10 +36,37 @@ class RuntimeCapabilityHarness:
         return tuple(sorted(self.state.direct_skills.union(
             *(set(b.skill_ids) for b in self.state.active_bundles))))
 
+    def _bundle_capabilities(self, skill_ids: tuple[str, ...], *,
+                             max_items: int = 8,
+                             max_chars: int = 120) -> list[str]:
+        """Bounded, deterministic coverage phrases from offline card fields."""
+
+        phrases: list[str] = []
+        seen: set[str] = set()
+        for skill_id in sorted(skill_ids):
+            structured = self.discovery.capability_phrases(skill_id)
+            if not structured:
+                structured = (self.discovery.records[skill_id].description,)
+            for raw in structured:
+                phrase = ' '.join(raw.split()).strip()
+                if not phrase:
+                    continue
+                if len(phrase) > max_chars:
+                    phrase = phrase[:max_chars - 1].rstrip() + '…'
+                key = phrase.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                phrases.append(phrase)
+                if len(phrases) == max_items:
+                    return phrases
+        return phrases
+
     def render_bundle_context(self) -> str:
         """Compact maintained capabilities; no direct surface, bodies or cards."""
         return json.dumps({'maintained_bundles': [
             {'bundle_id': bundle.bundle_id, 'purpose': bundle.purpose,
+             'capabilities': self._bundle_capabilities(bundle.skill_ids),
              'members': [
                  {'skill_id': skill_id,
                   'name': self.discovery.records[skill_id].name,

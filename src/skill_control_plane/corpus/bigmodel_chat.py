@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -41,6 +41,7 @@ class BigModelChatClient:
     reasoning_effort: str = "low"
     timeout: float = 120.0
     urlopen_fn: UrlopenFn = urlopen
+    last_usage: dict | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.api_key = (
@@ -146,6 +147,8 @@ class BigModelChatClient:
             ) from exc
 
         data = json.loads(raw)
+        usage = data.get('usage')
+        self.last_usage = usage if isinstance(usage, dict) else None
         choices = data.get("choices")
         if not isinstance(choices, list) or not choices:
             raise RuntimeError("BigModel chat response has no choices")
