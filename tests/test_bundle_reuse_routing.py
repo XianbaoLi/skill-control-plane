@@ -137,12 +137,12 @@ def test_evicted_reload_turn_audit_has_exact_load_only():
     assert audit['bundle_member_body_state_after'] == {'powerpoint': 'resident'}
 
 
-def test_evicted_missing_reload_is_not_mislabeled_resident_reuse():
+def test_evicted_metadata_reuse_is_not_mislabeled_resident_reuse():
     runtime = harness('evicted')
     agent = ExperimentalSkillAgent(
         runtime, Client([{'role': 'assistant', 'content': 'Skipped.'}]))
     agent.run('继续改刚才 PPT 的第三页')
-    assert agent.turn_audit['bundle_reuse_outcome'] == 'evicted_reload_missing'
+    assert agent.turn_audit['bundle_reuse_outcome'] == 'bundle_metadata_reuse'
 
 
 def test_gap_trace_records_discovery_without_host_side_shortcut():

@@ -45,8 +45,9 @@ Before calling load_capability:
 1. Inspect Runtime Bundles first.
 2. Compare the next concrete task requirement against each Bundle's purpose,
    capabilities, and member Skill metadata.
-3. If a Bundle covers the requirement, reuse a resident body directly or call
-   load_skill_body(skill_id) for an evicted body.
+3. If a Bundle covers the requirement, follow the Runtime Body Policy: reuse a
+   resident body, or decide from Bundle metadata whether an evicted body needs
+   exact reload.
 4. Only call load_capability for the residual capability gap no Bundle covers.
 
 Never rediscover an existing Bundle capability. New user wording does not imply
@@ -59,12 +60,9 @@ skills merely because they might be useful.
 
 Use the provided function tools when needed. Otherwise answer the user normally.
 For each maintained Bundle member, the latest system metadata reports the
-authoritative body_state. If the needed Skill is resident, use its instructions
-already in the conversation. If it is evicted, you MUST call
-load_skill_body(skill_id) before using it, even when an older apply or body-load
-result remains visible in history: that older copy is no longer resident. Never
-call load_capability to search again for a Skill already in a Bundle. Only use
-discovery when no current Bundle contains the needed capability.
+authoritative body_state. Never call load_capability to search again for a Skill
+already represented by a Bundle. Only use discovery when no current Bundle
+contains the needed capability.
 load_capability only searches; it does not load instructions or change state.
 Read each result before calling apply_capability. You may search again when
 another capability is needed. Select only candidate skill IDs retrieved in this
@@ -89,15 +87,34 @@ class AgentStepLimitError(RuntimeError):
 EVICTED_BODY_TOMBSTONE = '[evicted from active context]'
 SUPERSEDED_BODY_TOMBSTONE = '[superseded in active context]'
 
+METADATA_FIRST_BODY_POLICY = '''Runtime Body Policy:
+An evicted body is unavailable: never rely on it, reconstruct it from memory, or
+quote it. First decide from Bundle purpose, capabilities, and member metadata
+whether the current step can be handled without detailed Skill instructions. If
+that metadata is sufficient, continue without reloading. Ordinary continuation
+requests such as changing presentation content, titles, page order, or layout do
+not by themselves require the full body. Reload only when the current request
+depends on exact Skill-specific procedures, commands, constraints, or validation
+guidance that the Bundle metadata does not contain. The absence of an execution
+tool is not a reason to reload. When those details are needed, call
+load_skill_body(skill_id).'''
+
+MANDATORY_RELOAD_BODY_POLICY = '''Runtime Body Policy (mandatory-reload baseline):
+An evicted body is unavailable. If this turn relies on an evicted Bundle Skill,
+you MUST call load_skill_body(skill_id) before answering. Bundle metadata is not
+sufficient to skip this reload. Never rely on or quote the old body.'''
+
 
 class ExperimentalSkillAgent:
     def __init__(self, harness: RuntimeCapabilityHarness, client: ConversationClient,
-                 *, max_steps: int = 8):
+                 *, max_steps: int = 8,
+                 require_evicted_body_reload: bool = False):
         if max_steps < 1:
             raise ValueError('max_steps must be positive')
         self.harness = harness
         self.client = client
         self.max_steps = max_steps
+        self.require_evicted_body_reload = require_evicted_body_reload
         self.history: list[dict] = []
         self._history_skill_ids: set[str] = set()
         self.trace: list[dict] = []
@@ -115,11 +132,10 @@ class ExperimentalSkillAgent:
             if body_state == 'evicted'
         )
         gate = json.dumps(evicted, ensure_ascii=False, separators=(',', ':'))
-        return ('RUNTIME BODY GATE — evaluate before answering or choosing tools.\n'
-                'The exact Bundle Skill IDs below are evicted from current context. '
-                'If this turn relies on any listed Skill, you MUST call '
-                'load_skill_body for that ID before answering. Older body results '
-                'in history do not satisfy this gate.\n'
+        body_policy = (MANDATORY_RELOAD_BODY_POLICY
+                       if self.require_evicted_body_reload
+                       else METADATA_FIRST_BODY_POLICY)
+        return (body_policy + '\n'
                 'Authoritative evicted Bundle Skill IDs: '
                 + gate
                 + '\n\n'
@@ -228,7 +244,7 @@ class ExperimentalSkillAgent:
             outcome = 'evicted_reload'
         elif any(state == 'evicted' for state in self.turn_audit[
                 'bundle_member_body_state_before'].values()):
-            outcome = 'evicted_reload_missing'
+            outcome = 'bundle_metadata_reuse'
         elif self.turn_audit['bundle_state_before']:
             outcome = 'resident_reuse'
         else:
