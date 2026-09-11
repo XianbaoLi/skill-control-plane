@@ -53,22 +53,26 @@ def audit_context_flow(calls, records):
         history = messages[1:]
         assert history[:len(previous_history)] == previous_history
         if number > 1:
-            assert history[len(previous_history)] == {
-                'role': 'assistant', 'content': calls[number - 2]['response']}
+            assert history[len(previous_history)] == calls[number - 2]['response']
         previous_history = history
         bodies, results = [], []
+        pending = {}
         for message in history:
-            if message['role'] != 'user':
+            if message['role'] == 'assistant':
+                assert not pending
+                for tool_call in message.get('tool_calls') or []:
+                    assert tool_call['id'] not in pending
+                    pending[tool_call['id']] = tool_call['function']['name']
                 continue
-            try:
-                envelope = json.loads(message['content'])
-            except ValueError:
+            if message['role'] != 'tool':
+                assert not pending
                 continue
-            if not isinstance(envelope, dict) or envelope.get('type') != 'capability_tool_result':
+            name = pending.pop(message['tool_call_id'])
+            result = json.loads(message['content'])
+            results.append(name)
+            if 'error' in result:
                 continue
-            result = envelope['result']
-            results.append(envelope['tool'])
-            if envelope['tool'] == 'apply_capability':
+            if name == 'apply_capability':
                 for body in result['skill_bodies']:
                     skill_id = body['skill_id']
                     assert skill_id in result['selected_skill_ids']
@@ -76,9 +80,10 @@ def audit_context_flow(calls, records):
                     assert body['body'] == records[skill_id].body
                     bodies.append(skill_id)
             else:
-                assert envelope['tool'] == 'load_capability'
+                assert name == 'load_capability'
                 assert result['backend'] == 'rrf'
                 assert 'skill_bodies' not in result
+        assert not pending
         for record in records.values():
             if record.body and record.skill_id not in bodies:
                 assert record.body not in '\n'.join(m['content'] for m in history)
@@ -99,7 +104,7 @@ def main():
     base.mkdir(parents=True, exist_ok=True)
     output = Path(mkdtemp(prefix='live-', dir=base)) / 'trace.json'
     report = {'started': datetime.now(timezone.utc).isoformat(), 'task': args.task,
-              'version': 'v0.2', 'live_api': True, 'retrieval': 'BM25 + Dense + RRF',
+              'version': 'native-tools', 'live_api': True, 'retrieval': 'BM25 + Dense + RRF',
               'dense_fallback': False, 'model_calls': [], 'trace': []}
     agent = None
 
@@ -113,11 +118,11 @@ def main():
         def __init__(self, client):
             self.client = client
 
-        def complete_messages(self, messages):
-            call = {'messages': deepcopy(messages)}
+        def complete_messages(self, messages, *, tools):
+            call = {'messages': deepcopy(messages), 'tools': deepcopy(tools)}
             report['model_calls'].append(call)
             save()
-            response = self.client.complete_messages(messages)
+            response = self.client.complete_messages(messages, tools=tools)
             call['response'] = response
             save()
             print(json.dumps({'step': len(report['model_calls']),
@@ -142,7 +147,8 @@ def main():
         agent = ExperimentalSkillAgent(harness, RecordingClient(chat), max_steps=args.max_steps)
         report['final'] = agent.run(args.task)
         # Acceptance measures observed actions; it does not prescribe model decisions.
-        search_steps = [r for r in agent.trace if r['model_action']['type'] == 'load_capability']
+        search_steps = [r for r in agent.trace if any(
+            e['tool'] == 'load_capability' for e in r['tool_executions'])]
         applications = [r for r in agent.trace if r['action'] in {'DIRECT', 'EXTEND', 'CREATE'}]
         report['context_audit'] = audit_context_flow(report['model_calls'], discovery.records)
         injected_later = any(

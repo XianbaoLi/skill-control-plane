@@ -1,4 +1,4 @@
-# Experimental Skill Agent v0.2
+# Experimental Skill Agent — native tool calling
 
 This bounded experiment tests dynamic Skill management using one conversation
 client and one growing history. It is not an execution agent or a general agent
@@ -7,15 +7,15 @@ framework. No resolver model runs inside capability loading.
 ```text
 User task + retained history
   → same client.complete_messages([current system context, *history])
-  → assistant JSON load_capability(need)
+  → assistant native load_capability function call
   → Harness.search_capability → existing SkillDiscovery
-  → candidates + representations/evidence appended to history as tool result
+  → assistant message + candidates/evidence appended as role: tool
   → same client.complete_messages([current system context, *history])
-  → assistant JSON apply_capability(DIRECT / EXTEND / CREATE)
+  → assistant native apply_capability function call
   → Harness.apply_capability → validate_decision → apply_decision
-  → new RuntimeCapabilityState + apply result with selected bodies appended to history
+  → updated state + apply result with selected bodies appended as role: tool
   → same client, retained history + regenerated system containing Bundle metadata only
-  → continue or final
+  → normal assistant content finishes the user turn
 ```
 
 ## Minimal API
@@ -34,12 +34,11 @@ trace = agent.trace
 follow_up = agent.run('A follow-up task')
 ```
 
-`BigModelChatClient.complete_messages(messages)` uses the existing HTTP transport
-and configured model, sends the supplied messages unchanged, and returns raw
-assistant text. It inserts no extraction instructions and does not canonicalize
-JSON (so duplicate action keys remain detectable). The original `__call__(prompt)`
-still adds its extraction system/user pair and returns canonical JSON, preserving
-existing callers and tests.
+`BigModelChatClient.complete_messages(messages, tools=...)` sends complete history
+and OpenAI-compatible tools, then returns the complete assistant message including
+`content`, `tool_calls`, `reasoning_content`, and provider fields. The original
+`__call__(prompt)` extraction API stays compatible: it adds extraction messages,
+requires content, and canonicalizes that JSON object.
 
 The Agent never calls `RuntimeCapabilityLoader.load_capability` or instantiates
 `LLMCapabilityResolver`. The harness accepts either a legacy loader or a discovery
@@ -47,23 +46,22 @@ instance; the latter needs no resolver credentials. Legacy combined loading and
 metadata-only `render_context()` remain compatible. The experimental Agent uses
 `render_bundle_context()` instead; it does not use the legacy direct-skill surface.
 
-## Action protocol and history
+## Native tools and history
 
-Each completion is exactly one JSON object with one of three `type` values:
+The Agent registers two `tool_choice: "auto"` functions. `load_capability(need)`
+calls `harness.search_capability`, makes no state change, and returns candidates,
+evidence, representations and backend details. `apply_capability(action, skill_ids,
+reason, target_bundle_id?, purpose?)` calls `harness.apply_capability`, preserving
+the existing `validate_decision` and `apply_decision` authority. Success returns
+organization, affected bundle, selected IDs, state and selected full Skill bodies.
 
-- `load_capability`: only `type` and a nonblank string `need`.
-- `apply_capability`: `type` plus the existing strict DIRECT/EXTEND/CREATE schema
-  (`action`, `skill_ids`, `reason`, and action-specific target or purpose).
-- `final`: only `type` and nonblank string `content`.
-
-A load action calls `harness.search_capability`, performing one Skill search and
-storing the returned candidates without changing runtime state. It returns the
-complete `SkillDiscoveryResult` as a JSON `capability_tool_result` envelope in a
-user-role message. Apply results use the same envelope and include `action`,
-`affected_bundle_id`, `selected_skill_ids` and `skill_bodies` (ID/full body pairs). This is a provider-neutral
-JSON protocol, not native tool calling; the system prompt explicitly identifies
-these user-role envelopes as tool data. Every assistant action, original user
-message and result remains in `agent.history` for subsequent model calls.
+The exact assistant message containing `tool_calls` enters history. Each call gets
+one `role: "tool"` result with the original `tool_call_id`, including batches. A
+nonblank assistant `content` with no tool calls completes the current user turn;
+the old text JSON action and `final` protocol are gone. Harness errors are returned
+as paired tool errors in the same history, leaving state unchanged so the model can
+correct its call. Unpairable malformed tool-call envelopes are rejected before
+they enter history.
 
 Each model call has exactly one regenerated system message followed by a snapshot
 of the complete history. State updates never clear history. A new `run()` adds a
@@ -90,7 +88,7 @@ explicit successful application.
 
 `harness.apply_capability()` prepares a result containing the validated selected
 IDs and their exact `SkillRecord.body` values before committing the new state.
-The Agent appends those bodies as the apply tool result. It tracks delivered IDs
+The Agent appends those bodies as a native `role: "tool"` apply result. It tracks delivered IDs
 for this conversation, so selecting the same skill again (including DIRECT then
 CREATE/EXTEND, or a later `run()`) retains selected IDs in the result but omits
 already-delivered bodies. Deduplication belongs to conversation history, not to
@@ -148,7 +146,7 @@ metadata, and the earlier history/assistant responses are retained. Per-call
 Traces are written to unique local directories even on failure. Ordinary pytest
 is network-free.
 
-Not included: command/file execution, provider-native tools, OpenPI/Pi, hard
+Not included: command/file execution, OpenPI/Pi, hard
 triggers, automatic candidate sufficiency/retrieval policies, bundle lifecycle,
 persistence, concurrent mutation handling or context truncation. The action loop
 already permits another explicit model load with a new need, but no sufficiency

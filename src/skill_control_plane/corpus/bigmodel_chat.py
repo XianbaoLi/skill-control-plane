@@ -83,19 +83,23 @@ class BigModelChatClient:
         if not prompt.strip():
             raise ValueError("prompt must not be empty")
 
-        return canonical_json_text(self.complete_messages([
+        message = self.complete_messages([
             {"role": "system", "content": (
                 "You are a deterministic information-extraction engine. "
                 "Return only the JSON object requested by the user prompt."
             )},
             {"role": "user", "content": prompt},
-        ]))
+        ])
+        content = message.get('content')
+        if not isinstance(content, str) or not content.strip():
+            raise RuntimeError('BigModel extraction response has no text content')
+        return canonical_json_text(content)
 
-    def complete_messages(self, messages: list[dict[str, str]]) -> str:
-        """Send the complete conversation unchanged; return raw assistant text.
+    def complete_messages(self, messages: list[dict], *, tools: list[dict] | None = None) -> dict:
+        """Send full history and optional native tools; retain the assistant message.
 
-        No extraction prompt or JSON canonicalization is added here. The caller
-        owns its action protocol, including duplicate-key validation.
+        Content, tool_calls and provider fields (including reasoning) are returned
+        unchanged for the caller to append to its next request.
         """
         if not messages:
             raise ValueError("messages must not be empty")
@@ -103,6 +107,7 @@ class BigModelChatClient:
             {
                 "model": self.model,
                 "messages": messages,
+                **({"tools": tools, "tool_choice": "auto"} if tools is not None else {}),
                 "stream": False,
                 "thinking": {"type": "enabled"},
                 "reasoning_effort": self.reasoning_effort,
@@ -148,7 +153,7 @@ class BigModelChatClient:
         if not isinstance(message, dict):
             raise RuntimeError("BigModel chat response has no message")
         content = message.get("content")
-        if not isinstance(content, str) or not content.strip():
+        if not message.get("tool_calls") and (not isinstance(content, str) or not content.strip()):
             finish_reason = choices[0].get("finish_reason")
             reasoning = message.get("reasoning_content")
             if not isinstance(reasoning, str):
@@ -162,4 +167,4 @@ class BigModelChatClient:
                 f"tool_calls={has_tool_calls})"
             )
 
-        return content
+        return message

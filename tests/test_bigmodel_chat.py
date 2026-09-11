@@ -111,18 +111,31 @@ def test_chat_specific_configuration_precedes_legacy(monkeypatch):
     assert client.model == "GLM-5.3-Flash"
 
 
-def test_complete_messages_sends_history_unchanged_and_preserves_raw_json():
+def test_complete_messages_sends_tools_and_preserves_full_assistant():
     captured = []
-    raw = '{"type":"final","type":"load_capability","content":"done"}'
+    message = {'role': 'assistant', 'content': None, 'reasoning_content': 'plan',
+               'tool_calls': [{'id': 'call-1', 'type': 'function', 'function': {
+                   'name': 'load_capability', 'arguments': '{"need":"PDF"}'}}]}
     def fake_urlopen(request, timeout):
         captured.append(json.loads(request.data))
-        return FakeResponse({'choices': [{'message': {'content': raw}}]})
+        return FakeResponse({'choices': [{'message': message}]})
     client = BigModelChatClient(api_key='test', urlopen_fn=fake_urlopen)
-    messages = [{'role': 'system', 'content': 'agent protocol'},
-                {'role': 'user', 'content': 'original task'},
-                {'role': 'assistant', 'content': '{"type":"load_capability","need":"PDF"}'},
-                {'role': 'user', 'content': '{"type":"capability_tool_result"}'}]
-    assert client.complete_messages(messages) == raw
-    assert captured[0]['messages'] == messages
-    assert 'extraction' not in json.dumps(captured[0]['messages'])
-    assert captured[0]['model'] == client.model
+    from skill_control_plane.runtime.experimental_agent import CAPABILITY_TOOLS
+    messages = [{'role': 'system', 'content': 'agent rules'},
+                {'role': 'user', 'content': 'original task'}]
+    assert client.complete_messages(messages, tools=CAPABILITY_TOOLS) == message
+    messages += [message, {'role': 'tool', 'tool_call_id': 'call-1', 'content': '{}'}]
+    client.complete_messages(messages, tools=CAPABILITY_TOOLS)
+    assert captured[-1]['messages'] == messages
+    assert captured[-1]['tools'] == CAPABILITY_TOOLS
+    assert captured[-1]['tool_choice'] == 'auto'
+    assert captured[-1]['model'] == client.model
+
+
+def test_complete_messages_accepts_prose_and_extraction_still_canonicalizes():
+    reply = {'role': 'assistant', 'content': 'ordinary "quoted" text\nwith newlines'}
+    client = BigModelChatClient(api_key='test', urlopen_fn=lambda *a, **k:
+                               FakeResponse({'choices': [{'message': reply}]}))
+    assert client.complete_messages([{'role': 'user', 'content': 'hello'}]) == reply
+    reply['content'] = '```json\n{"answer": 42}\n```'
+    assert client('extract') == '{"answer":42}'
