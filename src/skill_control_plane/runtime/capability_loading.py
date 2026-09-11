@@ -18,10 +18,21 @@ class ActiveBundle:
     skill_ids: tuple[str, ...]
 
 
+BodyState = Literal['resident', 'evicted']
+
+
 @dataclass
 class RuntimeCapabilityState:
     active_bundles: list[ActiveBundle] = field(default_factory=list)
     direct_skills: set[str] = field(default_factory=set)
+    skill_body_states: dict[str, BodyState] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Existing/rehydrated Bundle state has no proof that bodies are present in
+        # the current conversation, so missing residency starts as evicted.
+        for bundle in self.active_bundles:
+            for skill_id in bundle.skill_ids:
+                self.skill_body_states.setdefault(skill_id, 'evicted')
 
 
 @dataclass(frozen=True)
@@ -58,11 +69,17 @@ def validate_state(state: RuntimeCapabilityState, discovery: SkillDiscovery) -> 
     known = set(discovery.records)
     if not state.direct_skills <= known:
         raise ValueError('unknown direct skill')
+    bundle_skills: set[str] = set()
     for bundle in state.active_bundles:
         if not bundle.bundle_id.strip() or not bundle.purpose.strip() or not bundle.skill_ids:
             raise ValueError('active bundle requires id, purpose and skills')
         if len(bundle.skill_ids) != len(set(bundle.skill_ids)) or set(bundle.skill_ids) - known:
             raise ValueError('unknown or duplicate active bundle skill')
+        bundle_skills.update(bundle.skill_ids)
+    if set(state.skill_body_states) != bundle_skills:
+        raise ValueError('body state must exist exactly for Bundle members')
+    if set(state.skill_body_states.values()) - {'resident', 'evicted'}:
+        raise ValueError('invalid Skill body state')
 
 
 def _strict_object(pairs):
@@ -197,7 +214,7 @@ def apply_decision(decision: CapabilityDecision, skills: SkillDiscoveryResult,
         while target in {b.bundle_id for b in active}:
             target = 'cap-' + uuid4().hex
         active.append(ActiveBundle(target, decision.purpose, decision.skill_ids))
-    return RuntimeCapabilityState(active, direct), target
+    return RuntimeCapabilityState(active, direct, dict(state.skill_body_states)), target
 
 
 class RuntimeCapabilityLoader:

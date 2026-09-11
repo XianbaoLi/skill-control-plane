@@ -87,7 +87,9 @@ def audit_context_flow(calls, records):
         for bundle in surface['maintained_bundles']:
             assert set(bundle) == {'bundle_id', 'purpose', 'members'}
             for member in bundle['members']:
-                assert set(member) == {'skill_id', 'name', 'short_description'}
+                assert set(member) == {'skill_id', 'name', 'short_description',
+                                       'body_state'}
+                assert member['body_state'] in {'resident', 'evicted'}
                 record = records[member['skill_id']]
                 assert member['name'] == record.name
                 assert member['short_description'] == ' '.join(record.description.split())[:240]
@@ -124,6 +126,10 @@ def audit_context_flow(calls, records):
                     assert skill_id not in bodies
                     assert body['body'] == records[skill_id].body
                     bodies.append(skill_id)
+            elif name == 'load_skill_body':
+                if result['status'] == 'loaded':
+                    assert result['body'] == records[result['skill_id']].body
+                    bodies.append(result['skill_id'])
             else:
                 assert name == 'load_capability'
                 assert result['backend'] == 'rrf'

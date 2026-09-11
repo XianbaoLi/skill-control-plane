@@ -28,6 +28,7 @@ class SkillDiscovery:
         if source_k < 1:
             raise ValueError("source_k must be positive")
         self.source_k = source_k
+        self.registry = registry
         self.records = {s.skill_id: s for s in registry}
         self.texts = {s.skill_id: s.retrieval_representation or metadata_text(s)
                       for s in registry}
@@ -35,6 +36,11 @@ class SkillDiscovery:
                                 tags=(), body="") for s in registry)
         self.bm25 = BM25Retriever(indexed)
         self.dense = dense_factory(indexed) if dense_factory else None
+
+    def load_skill_body(self, skill_id: str) -> str:
+        """Delegate an exact body read to the canonical Skill store."""
+
+        return self.registry.load_skill_body(skill_id)
 
     def discover_skills(self, query: str, k: int = 5) -> SkillDiscoveryResult:
         if not query.strip() or k < 1:

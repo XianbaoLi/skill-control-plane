@@ -32,6 +32,12 @@ CAPABILITY_TOOLS = [
             'target_bundle_id': {'type': 'string', 'description': 'Required only for EXTEND.'},
             'purpose': {'type': 'string', 'description': 'Required only for CREATE.'}},
             'required': ['action', 'skill_ids', 'reason'], 'additionalProperties': False}}},
+    {'type': 'function', 'function': {
+        'name': 'load_skill_body',
+        'description': 'Exactly reload the full body of an evicted Skill already in a current Bundle. Does not search.',
+        'parameters': {'type': 'object', 'properties': {
+            'skill_id': {'type': 'string', 'minLength': 1}},
+            'required': ['skill_id'], 'additionalProperties': False}}},
 ]
 
 AGENT_INSTRUCTIONS = '''Use currently loaded capabilities when sufficient.
@@ -42,6 +48,13 @@ they should be loaded DIRECT, used to EXTEND an existing maintained bundle, or
 form a new CREATE bundle. Do not load skills merely because they might be useful.
 
 Use the provided function tools when needed. Otherwise answer the user normally.
+For each maintained Bundle member, the latest system metadata reports the
+authoritative body_state. If the needed Skill is resident, use its instructions
+already in the conversation. If it is evicted, you MUST call
+load_skill_body(skill_id) before using it, even when an older apply or body-load
+result remains visible in history: that older copy is no longer resident. Never
+call load_capability to search again for a Skill already in a Bundle. Only use
+discovery when no current Bundle contains the needed capability.
 load_capability only searches; it does not load instructions or change state.
 Read each result before calling apply_capability. You may search again when
 another capability is needed. Select only candidate skill IDs retrieved in this
@@ -76,7 +89,16 @@ class ExperimentalSkillAgent:
         self.trace: list[dict] = []
 
     def render_system_context(self) -> str:
-        return (AGENT_INSTRUCTIONS + '\nRuntime Bundles (metadata only)\n'
+        evicted = sorted(
+            skill_id for skill_id, body_state
+            in self.harness.state.skill_body_states.items()
+            if body_state == 'evicted'
+        )
+        gate = json.dumps(evicted, ensure_ascii=False, separators=(',', ':'))
+        return (AGENT_INSTRUCTIONS
+                + '\nAuthoritative evicted Bundle Skill IDs (reload before use): '
+                + gate
+                + '\nRuntime Bundles (metadata only)\n'
                 + self.harness.render_bundle_context())
 
     def _state_snapshot(self) -> dict:
@@ -116,6 +138,13 @@ class ExperimentalSkillAgent:
             result['skill_bodies'] = [body for body in result['skill_bodies']
                                     if body['skill_id'] not in self._history_skill_ids]
             result['state'] = self._state_snapshot()
+        elif name == 'load_skill_body':
+            if set(arguments) != {'skill_id'} or not isinstance(arguments['skill_id'], str):
+                raise ValueError('load_skill_body requires only string skill_id')
+            result = self.harness.load_skill_body(arguments['skill_id'])
+            if result['status'] == 'loaded':
+                row.setdefault('body_loaded_skill_ids', []).append(result['skill_id'])
+            event['exact_body_load'] = result['status']
         else:
             raise ValueError('unknown capability tool')
         return result
@@ -187,6 +216,8 @@ class ExperimentalSkillAgent:
                         pool_transition['after'] = self._pending_snapshot()
                     self._tool_result(call['id'], result)
                     appended = [b['skill_id'] for b in result.get('skill_bodies', [])]
+                    if result.get('status') == 'loaded' and 'body' in result:
+                        appended.append(result['skill_id'])
                     row['appended_skill_body_ids'].extend(appended)
                     self._history_skill_ids.update(appended)
             except Exception as exc:

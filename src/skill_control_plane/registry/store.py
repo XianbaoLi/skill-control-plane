@@ -26,6 +26,11 @@ class SkillRegistry:
     def get(self, skill_id: str) -> SkillRecord:
         return self._skills[skill_id]
 
+    def load_skill_body(self, skill_id: str) -> str:
+        """Read a Skill body by canonical ID without invoking retrieval."""
+
+        return self.get(skill_id).body
+
     def values(self) -> tuple[SkillRecord, ...]:
         return tuple(self._skills.values())
 

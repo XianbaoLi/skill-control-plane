@@ -196,12 +196,16 @@ def test_harness_stable_compact_context_without_library(discovery, monkeypatch):
     data = context_data(harness)
     assert data['direct_skills'] == ['pdf', 'slides']
     assert data['maintained_bundles'] == [
-        {'bundle_id': 'a', 'purpose': 'Code review', 'skill_ids': ['github']},
-        {'bundle_id': 'z', 'purpose': 'Mail operations', 'skill_ids': ['email', 'pdf']},
+        {'bundle_id': 'a', 'purpose': 'Code review', 'skill_ids': ['github'],
+         'members': [{'skill_id': 'github', 'body_state': 'evicted'}]},
+        {'bundle_id': 'z', 'purpose': 'Mail operations', 'skill_ids': ['email', 'pdf'],
+         'members': [{'skill_id': 'email', 'body_state': 'evicted'},
+                     {'skill_id': 'pdf', 'body_state': 'evicted'}]},
     ]
     tool = data['tools'][0]
     assert tool['name'] == 'load_capability'
     assert tool['parameters']['required'] == ['need']
+    assert data['tools'][1]['name'] == 'load_skill_body'
     assert 'load_capability(need)' in harness.render_context()
     assert 'only when current capabilities are insufficient' in harness.render_context()
     assert 'do not guess Skill names or Bundle names' in harness.render_context()
@@ -230,7 +234,8 @@ def test_harness_turn_to_turn_direct_create_extend(discovery):
     created = harness.load_capability('GitHub pull request review')
     bundle_id = created.affected_bundle_id
     assert context_data(harness)['maintained_bundles'] == [
-        {'bundle_id': bundle_id, 'purpose': 'Review code', 'skill_ids': ['github']}]
+        {'bundle_id': bundle_id, 'purpose': 'Review code', 'skill_ids': ['github'],
+         'members': [{'skill_id': 'github', 'body_state': 'evicted'}]}]
     harness.load_capability('GitHub Actions CI failure')
     assert context_data(harness)['maintained_bundles'][0]['skill_ids'] == ['github', 'github-actions']
     assert context_data(harness)['direct_skills'] == ['pdf', 'slides']
