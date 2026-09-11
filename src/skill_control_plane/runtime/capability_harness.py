@@ -67,6 +67,10 @@ class RuntimeCapabilityHarness:
                 representations=tuple(representations.items()))
         return candidates
 
+    def model_visible_candidates(self, result: SkillDiscoveryResult) -> dict:
+        """Return the compact load_capability result safe to append to model history."""
+        return self.discovery.model_visible_payload(result)
+
     def apply_capability(self, raw_decision: str) -> dict:
         """Apply against this turn's uncommitted search pool; consume on success."""
         if self.pending_candidates is None:

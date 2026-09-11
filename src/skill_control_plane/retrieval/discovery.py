@@ -51,6 +51,32 @@ class SkillDiscovery:
             tuple((c.skill_id, self.texts[c.skill_id]) for c in chosen),
             "rrf" if self.dense is not None else "bm25", len(candidates) > k)
 
+    def model_visible_payload(self, result: SkillDiscoveryResult) -> dict:
+        """Serialize candidates for an LLM without exposing retrieval cards/debug data."""
+        unknown = {candidate.skill_id for candidate in result.candidates} - set(self.records)
+        if unknown:
+            raise ValueError(f"unknown discovery candidates: {sorted(unknown)}")
+        candidates = []
+        for candidate in result.candidates:
+            record = self.records[candidate.skill_id]
+            minimal_evidence: dict[str, object] = {}
+            matched = next((item.removeprefix("matched_terms: ").split(", ")
+                            for item in candidate.evidence
+                            if item.startswith("matched_terms: ")), None)
+            if matched:
+                minimal_evidence["matched_terms"] = matched[:6]
+            if "dense" in candidate.source_scores:
+                minimal_evidence["semantic_similarity"] = round(
+                    float(candidate.source_scores["dense"]), 4)
+            candidates.append({
+                "skill_id": candidate.skill_id,
+                "name": record.name,
+                "description": record.description,
+                "rank": candidate.rank,
+                "minimal_evidence": minimal_evidence,
+            })
+        return {"query": result.query, "candidates": candidates}
+
 
 def discover_skills(query: str, k: int = 5, *, discovery: SkillDiscovery) -> SkillDiscoveryResult:
     return discovery.discover_skills(query, k)

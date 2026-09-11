@@ -1,7 +1,10 @@
 import json
 
+import pytest
+
 from skill_control_plane.evals.discovery_scaling import (
-    DiscoveryCase, run_arm, subset_ids, summarize,
+    DiscoveryCase, EmbeddingCacheMiss, HashedEmbeddingCache,
+    audit_distractors, build_frozen_distractors, run_arm, subset_ids, summarize,
 )
 from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillRegistry
@@ -52,7 +55,8 @@ def test_full_catalog_has_only_catalog_and_equal_select_protocol():
 
 
 def test_retrieval_pool_merges_two_searches_then_selects_both():
-    available = records(); case = DiscoveryCase("case", "need", ("a", "b"), "test")
+    available = records(); case = DiscoveryCase("case", "need", ("a", "b"), "test",
+                                                search_phrases=("alpha", "beta"))
     client = ScriptedClient([call("load_capability", {"need": "alpha"}), call("load_capability", {"need": "beta"}),
                              call("select_skills", {"skill_ids": ["a", "b"]})])
     row = run_arm(arm="retrieval_first", case=case, ids=tuple(available), records=available, client=client,
@@ -62,21 +66,42 @@ def test_retrieval_pool_merges_two_searches_then_selects_both():
     assert row["target_entered_candidate_pool"]
     assert row["full_required_set_coverage"] == 1.0
     assert set(row["searches"][1]["pool_after"]) >= {"a", "b"}
+    search = row["searches"][0]
+    assert set(search) == {"need", "model_visible_payload",
+                           "internal_retrieval_record", "pool_after"}
+    assert search["internal_retrieval_record"]["representations"]
+    assert set(search["model_visible_payload"]) == {"query", "candidates"}
 
 
 def test_retrieval_failure_categories_distinguish_pool_from_selection():
     available = records(); discovery = SkillDiscovery(SkillRegistry(available.values()))
-    case = DiscoveryCase("case", "need", ("a",), "test")
+    case = DiscoveryCase("case", "need", ("a",), "test",
+                         search_phrases=("beta", "alpha beta"))
     no_pool = run_arm(arm="retrieval_first", case=case, ids=tuple(available), records=available,
                       client=ScriptedClient([call("load_capability", {"need": "beta"}), call("select_skills", {"skill_ids": ["b"]})]),
                       discovery=discovery, max_steps=2)
-    assert no_pool["failure_type"] == "target_not_in_candidate_pool"
+    assert no_pool["failure_type"] == "retrieval_miss"
+    assert no_pool["target_not_in_candidate_pool"]
     non_required_candidate = next(candidate.skill_id for candidate in discovery.discover_skills("alpha beta", k=10).candidates
                                   if candidate.skill_id != "a")
     in_pool = run_arm(arm="retrieval_first", case=case, ids=tuple(available), records=available,
                       client=ScriptedClient([call("load_capability", {"need": "alpha beta"}), call("select_skills", {"skill_ids": [non_required_candidate]})]),
                       discovery=discovery, max_steps=2)
-    assert in_pool["failure_type"] == "target_in_pool_llm_not_selected"
+    assert in_pool["failure_type"] == "llm_selection_miss"
+    assert in_pool["target_in_pool_llm_not_selected"]
+
+
+def test_rejected_selection_is_not_counted_as_committed_recall():
+    available = records(); discovery = SkillDiscovery(SkillRegistry(available.values()))
+    case = DiscoveryCase("case", "alpha", ("a",), "test", search_phrases=("alpha",))
+    row = run_arm(arm="retrieval_first", case=case, ids=tuple(available), records=available,
+                  client=ScriptedClient([call("load_capability", {"need": "alpha"}),
+                                         call("select_skills", {"skill_ids": ["invented"]})]),
+                  discovery=discovery, max_steps=2)
+    assert row["error"] == "ValueError"
+    assert row["selected_skill_ids"] == [] and row["required_skill_recall"] == 0.0
+    assert row["failure_type"] == "llm_selection_miss"
+    assert row["target_in_pool_llm_not_selected"]
 
 
 def test_summary_groups_costs_and_retrieval_failures():
@@ -88,7 +113,36 @@ def test_summary_groups_costs_and_retrieval_failures():
     full = {**base, "arm": "full_catalog", "corpus_size": 20}
     retrieval = {**base, "arm": "retrieval_first", "corpus_size": 20,
                  "retriever_candidate_recall": 1.0, "first_search_resolution_rate": 1.0,
-                 "failure_type": "target_in_pool_llm_not_selected"}
+                 "failure_type": "llm_selection_miss",
+                 "target_in_pool_llm_not_selected": True}
     result = summarize([full, retrieval])
     row = next(row for row in result if row["arm"] == "retrieval_first" and row["corpus_size"] == 20)
     assert row["avg_total_tokens"] == 8 and row["target_in_pool_llm_not_selected"] == 1
+
+
+def test_embedding_cache_is_snapshot_keyed_and_evaluation_is_read_only(tmp_path):
+    path = tmp_path / "cache.json"
+    calls = []
+    def provider(texts):
+        calls.append(list(texts))
+        return [[float(len(text)), 1.0] for text in texts]
+    prepared = HashedEmbeddingCache(path, model="m", dimensions=2,
+                                    corpus_identity="snapshot-a", readonly=False,
+                                    provider=provider)
+    assert prepared(["alpha", "beta"])[0] == [5.0, 1.0]
+    assert len(calls) == 1
+    evaluated = HashedEmbeddingCache(path, model="m", dimensions=2,
+                                     corpus_identity="snapshot-a", readonly=True)
+    assert evaluated(["alpha"])[0] == [5.0, 1.0]
+    with pytest.raises(EmbeddingCacheMiss):
+        evaluated(["uncached query"])
+
+
+def test_hard_distractors_are_reproducible_provenance_audited():
+    available = records()
+    cases = [DiscoveryCase("x", "alpha", ("a",), "test")]
+    first = build_frozen_distractors(available, cases, count=10)
+    assert first == build_frozen_distractors(available, cases, count=10)
+    audit = audit_distractors(first, {"a"}, set(available) - {"a"})
+    assert audit["record_count"] == audit["unique_description_count"] == 10
+    assert all(row["audit"]["required_capability_satisfied"] is False for row in first)

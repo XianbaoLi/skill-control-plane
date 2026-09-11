@@ -104,8 +104,11 @@ class ExperimentalSkillAgent:
                 raise ValueError('load_capability requires only string need')
             row['need'] = arguments['need']
             row['retrieved_skill_ids'] = []
-            result = asdict(self.harness.search_capability(arguments['need']))
+            internal = self.harness.search_capability(arguments['need'])
+            result = self.harness.model_visible_candidates(internal)
             row['retrieved_skill_ids'] = [c['skill_id'] for c in result['candidates']]
+            event['model_visible_payload'] = deepcopy(result)
+            event['internal_retrieval_record'] = asdict(internal)
         elif name == 'apply_capability':
             result = self.harness.apply_capability(json.dumps(arguments))
             row['selected_skill_ids'].extend(result['selected_skill_ids'])

@@ -106,8 +106,10 @@ def test_four_turns_preserve_history_extend_related_and_separate_unrelated(disco
     assert 'HIDDEN_PRIVATE_BODY' not in json.dumps(report)
     turn_three_surface = report['turns'][2]['system_bundle_metadata'][-1]
     assert 'xlsx' in {m['skill_id'] for m in turn_three_surface[0]['members']}
-    assert report['turns'][2]['retrieval_results'][0]['representations']
-    assert all('evidence' in c for c in report['turns'][2]['retrieval_results'][0]['candidates'])
+    payload = report['turns'][2]['retrieval_results'][0]
+    assert set(payload) == {'query', 'candidates'}
+    assert all(set(c) == {'skill_id', 'name', 'description', 'rank', 'minimal_evidence'}
+               for c in payload['candidates'])
     assert checkpoints[-1]['status'] == 'completed'
     assert checkpoints[-1]['turns'][0]['state_after'] == report['turns'][0]['state_after']
 

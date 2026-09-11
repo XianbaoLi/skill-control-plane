@@ -63,8 +63,9 @@ def test_native_search_apply_bodies_history_and_bundle_surface(harness, action):
         assert messages[-1]['tool_call_id'] == messages[-2]['tool_calls'][0]['id']
         result = json.loads(messages[-1]['content'])
         assert {c['skill_id'] for c in result['candidates']} == {'pdf', 'slides'}
-        assert result['representations']
-        assert all('evidence' in c for c in result['candidates'])
+        assert set(result) == {'query', 'candidates'}
+        assert all(set(c) == {'skill_id', 'name', 'description', 'rank',
+                              'minimal_evidence'} for c in result['candidates'])
         kwargs = {'purpose': 'Documents'} if action == 'CREATE' else {}
         if action == 'EXTEND':
             kwargs['target_bundle_id'] = 'mail-work'
@@ -94,6 +95,9 @@ def test_native_search_apply_bodies_history_and_bundle_surface(harness, action):
     else:
         assert len(surface['maintained_bundles']) == 2
     assert agent.trace[0]['state_before'] == agent.trace[0]['state_after']
+    retrieval_event = agent.trace[0]['tool_executions'][0]
+    assert set(retrieval_event) >= {'model_visible_payload', 'internal_retrieval_record'}
+    assert retrieval_event['internal_retrieval_record']['representations']
     assert agent.trace[2]['history_skill_body_ids'] == ['pdf']
     assert harness.pending_candidates is None
 
@@ -258,6 +262,24 @@ def test_bundle_surface_uses_member_metadata_only(harness):
     assert member['short_description'].startswith('extract PDF text detail')
     assert len(member['short_description']) == 240
     assert all(s not in surface for s in ['SECRET_CARD', 'BODY_', 'hidden'])
+
+
+def test_load_capability_model_surface_hides_full_retrieval_record(harness):
+    from dataclasses import replace
+    harness.discovery.records['pdf'] = replace(
+        harness.discovery.records['pdf'], retrieval_representation='SECRET_FULL_CARD')
+    harness.discovery.texts['pdf'] = 'SECRET_FULL_CARD'
+    agent = ExperimentalSkillAgent(harness, ScriptedClient([load('PDF'), FINAL]))
+    agent.run('task')
+    tool_payload = json.loads(agent.history[-2]['content'])
+    rendered = json.dumps(tool_payload)
+    assert 'SECRET_FULL_CARD' not in rendered
+    assert all(set(candidate) == {'skill_id', 'name', 'description', 'rank',
+                                  'minimal_evidence'}
+               for candidate in tool_payload['candidates'])
+    event = agent.trace[0]['tool_executions'][0]
+    assert event['model_visible_payload'] == tool_payload
+    assert 'SECRET_FULL_CARD' in json.dumps(event['internal_retrieval_record'])
 
 
 def test_full_assistant_preserved_multiple_calls_and_paired_batch_failure(harness):
