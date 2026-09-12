@@ -47,17 +47,22 @@ source commit, rerunning the freeze produces the same IDs and hashes.
 
 ## Package integrity
 
-The complete package hash is SHA-256 over all package files in sorted relative
-path order, updating:
+The complete package hash is `package-hash-v1`: SHA-256 over all package files
+in globally sorted relative path order. For each file, update:
 
 ```text
-relative_path_bytes + 0x00 + file_bytes
+8-byte big-endian path length + relative_path_bytes
++ 8-byte big-endian file length + file_bytes
 ```
 
-Thus `references/`, `scripts/`, and `assets/` affect the hash. The S128 corpus
-contains 1,185 files and 8,011,767 content bytes: 93 packages include
-references, 4 include scripts, and 3 include assets. The freeze script copies
-bytes without following symlinks and verifies each copied package hash.
+The explicit length framing makes concatenation boundaries unambiguous. Thus
+`references/`, `scripts/`, and `assets/` affect the hash, as do path changes.
+The manifest records the algorithm name. Selected package roots are checked for
+pairwise ancestor/descendant overlap before materialization.
+
+The S128 corpus contains 1,185 files and 8,011,767 content bytes: 93 packages
+include references, 4 include scripts, and 3 include assets. The freeze script
+copies bytes without following symlinks and verifies each copied package hash.
 
 ## Artifacts
 

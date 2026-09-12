@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -8,7 +9,9 @@ import pytest
 
 from skill_control_plane.corpus.freezing import (
     FreezeError,
+    SourcePackage,
     _audit_source_packages,
+    _assert_selected_roots_do_not_overlap,
     _ensure_disjoint,
     _hash_package,
     _select_subsets,
@@ -46,6 +49,7 @@ def _make_source(
     root: Path,
     *,
     category_counts: dict[str, int] | None = None,
+    with_nested: bool = False,
 ) -> Path:
     category_counts = category_counts or {"alpha": 64, "beta": 32, "gamma": 32}
     source_root = root / "source"
@@ -57,6 +61,14 @@ def _make_source(
                 f"{category}-{index:03d}",
                 with_files=index % 3 == 0,
             )
+    if with_nested:
+        _write_package(source_root, "alpha", "nested-router")
+        nested_root = source_root / "skills" / "alpha" / "nested-router"
+        (nested_root / "inner").mkdir()
+        (nested_root / "inner" / "SKILL.md").write_text(
+            "---\nname: nested-inner\ndescription: Nested.\n---\n\nbody\n",
+            encoding="utf-8",
+        )
     _init_git_repo(source_root)
     return source_root
 
@@ -141,6 +153,7 @@ def test_freeze_selects_exact_128_and_uses_stratification(tmp_path: Path) -> Non
     manifest, _, _ = _freeze(source_root, tmp_path)
 
     assert manifest["selected_count"] == 128
+    assert manifest["package_hash_algorithm"]["name"] == "package-hash-v1"
     assert manifest["eligible_skill_count"] == 128
     assert [len(manifest["subsets"][name]) for name in ("S32", "S64", "S128")] == [32, 64, 128]
     assert set(manifest["subsets"]["S32"]) < set(manifest["subsets"]["S64"])
@@ -232,6 +245,79 @@ def test_package_hash_is_deterministic_and_changes_with_package_files(tmp_path: 
     (root / "assets" / "asset.txt").write_text("asset\n", encoding="utf-8")
     with_asset = _package_hash(root)
     assert with_asset != with_script
+
+
+def test_package_hash_v1_changes_when_relative_path_changes(tmp_path: Path) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    for root, filename in ((first, "guide.md"), (second, "renamed.md")):
+        root.mkdir()
+        (root / "SKILL.md").write_text("skill\n", encoding="utf-8")
+        (root / filename).write_text("reference\n", encoding="utf-8")
+
+    assert _package_hash(first) == _package_hash(first)
+    assert _package_hash(first) != _package_hash(second)
+
+
+def test_package_hash_v1_frames_ambiguous_concatenations(tmp_path: Path) -> None:
+    two_files = tmp_path / "two-files"
+    one_file = tmp_path / "one-file"
+    two_files.mkdir()
+    one_file.mkdir()
+    (two_files / "SKILL.md").write_text("skill\n", encoding="utf-8")
+    (two_files / "a").write_bytes(b"b\0c")
+    (two_files / "c").write_bytes(b"")
+    (one_file / "SKILL.md").write_text("skill\n", encoding="utf-8")
+    (one_file / "a").write_bytes(b"b\0cc\0")
+
+    def unframed_bytes(root: Path) -> bytes:
+        payload = b""
+        for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+            if path.is_file():
+                relative = path.relative_to(root).as_posix().encode("utf-8")
+                payload += relative + b"\0" + path.read_bytes()
+        return payload
+
+    assert hashlib.sha256(unframed_bytes(two_files)).digest() == hashlib.sha256(
+        unframed_bytes(one_file)
+    ).digest()
+    assert _package_hash(two_files) != _package_hash(one_file)
+
+
+def test_selected_package_roots_are_pairwise_non_overlapping() -> None:
+    def package(relative_path: str, skill_id: str) -> SourcePackage:
+        return SourcePackage(
+            relative_path=relative_path,
+            category="alpha",
+            skill_id=skill_id,
+            content_hash="0" * 64,
+            package_hash="0" * 64,
+            package_file_count=1,
+            package_byte_size=1,
+        )
+
+    parent = package("skills/alpha/parent", "parent")
+    child = package("skills/alpha/parent/child", "child")
+    with pytest.raises(FreezeError, match="selected package roots overlap"):
+        _assert_selected_roots_do_not_overlap([parent, child])
+    with pytest.raises(FreezeError, match="selected package roots overlap"):
+        _assert_selected_roots_do_not_overlap([child, parent])
+
+
+def test_nested_source_packages_are_not_selected(tmp_path: Path) -> None:
+    source_root = _make_source(tmp_path, category_counts={"alpha": 128}, with_nested=True)
+    audited, _ = _audit_source_packages(source_root)
+    by_path = {package.relative_path: package for package in audited}
+    assert by_path["skills/alpha/nested-router"].exclusion_reason == (
+        "package contains nested SKILL.md files"
+    )
+    assert "skills/alpha/nested-router/inner" not in by_path
+
+    manifest, _, _ = _freeze(source_root, tmp_path)
+    selected_paths = {row["source_relative_path"] for row in manifest["skills"]}
+    assert manifest["selected_count"] == 128
+    assert "skills/alpha/nested-router" not in selected_paths
+    assert "skills/alpha/nested-router/inner" not in selected_paths
 
 
 def test_symlink_is_excluded_and_disjoint_roots_are_required(tmp_path: Path) -> None:

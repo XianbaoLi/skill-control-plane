@@ -20,6 +20,7 @@ from skill_control_plane.registry.loader import decode_skill_bytes, skill_conten
 CORPUS_VERSION = "benchmark-corpus-v0.1"
 SELECTION_ALGORITHM_NAME = "deterministic-stratified-largest-remainder"
 SELECTION_ALGORITHM_VERSION = "v1"
+PACKAGE_HASH_ALGORITHM = "package-hash-v1"
 SUBSET_SIZES = (32, 64, 128)
 SKILL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -67,11 +68,16 @@ def _package_files(package_root: Path) -> tuple[Path, ...]:
 def _hash_package(package_root: Path, files: tuple[Path, ...]) -> tuple[str, int]:
     digest = hashlib.sha256()
     total_size = 0
-    for file_path in files:
+    for file_path in sorted(
+        files,
+        key=lambda path: path.relative_to(package_root).as_posix(),
+    ):
         relative_path = file_path.relative_to(package_root).as_posix()
+        relative_path_bytes = relative_path.encode("utf-8")
         content = file_path.read_bytes()
-        digest.update(relative_path.encode("utf-8"))
-        digest.update(b"\0")
+        digest.update(len(relative_path_bytes).to_bytes(8, "big", signed=False))
+        digest.update(relative_path_bytes)
+        digest.update(len(content).to_bytes(8, "big", signed=False))
         digest.update(content)
         total_size += len(content)
     return digest.hexdigest(), total_size
@@ -320,6 +326,16 @@ def _select_subsets(
     return dict(sorted(subsets.items()))
 
 
+def _assert_selected_roots_do_not_overlap(selected: list[SourcePackage]) -> None:
+    roots = [Path(package.relative_path) for package in selected]
+    if len(set(path.as_posix() for path in roots)) != len(roots):
+        raise FreezeError("selected package roots overlap")
+    for index, ancestor in enumerate(roots):
+        for descendant in roots[index + 1 :]:
+            if _is_within(descendant, ancestor) or _is_within(ancestor, descendant):
+                raise FreezeError("selected package roots overlap")
+
+
 def _is_within(path: Path, parent: Path) -> bool:
     return path == parent or parent in path.parents
 
@@ -442,6 +458,8 @@ def freeze_benchmark_corpus(
         raise FreezeError("not enough eligible Skills")
     subsets = _select_subsets(source_commit, eligible)
     selected = subsets["S128"]
+    for subset in subsets.values():
+        _assert_selected_roots_do_not_overlap(subset)
 
     if clean_output and materialized_path.exists():
         shutil.rmtree(materialized_path)
@@ -499,6 +517,13 @@ def freeze_benchmark_corpus(
             "name": SELECTION_ALGORITHM_NAME,
             "version": SELECTION_ALGORITHM_VERSION,
             "order_hash": "sha256(source_commit + NUL + source_relative_path)",
+        },
+        "package_hash_algorithm": {
+            "name": PACKAGE_HASH_ALGORITHM,
+            "framing": (
+                "8-byte big-endian path length + path bytes + "
+                "8-byte big-endian file length + file bytes"
+            ),
         },
         "source_skill_md_count": source_skill_md_count,
         "source_skill_count": len(audited),
