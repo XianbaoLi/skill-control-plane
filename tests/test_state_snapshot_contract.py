@@ -24,6 +24,10 @@ def _store() -> SkillStore:
     ])
 
 
+def _check(readiness, name: str):
+    return next(check for check in readiness.checks if check.name == name)
+
+
 @pytest.fixture
 def runtime() -> SkillControlPlane:
     store = _store()
@@ -175,13 +179,18 @@ def test_readiness_reports_full_discovery_without_turn_state_pollution(runtime):
     assert readiness.ready is True
     assert readiness.skill_count == 2
     assert readiness.retrieval_cards_ready is True
+    assert readiness.dense_configured is True
     assert readiness.dense_ready is True
     assert readiness.fusion_backend == "rrf"
+    assert readiness.fusion_ready is True
+    assert readiness.probe_executed is True
+    assert readiness.probe_ready is True
     assert readiness.errors == ()
     assert {check.name for check in readiness.checks} == {
         "skill_store", "retrieval_cards", "dense_backend",
         "fusion_backend", "dense_rrf_probe"}
     assert all(check.ready for check in readiness.checks)
+    assert _check(readiness, "dense_rrf_probe").detail == "executed"
     assert runtime.context_snapshot() == before
     assert runtime.turn_audit() == before_audit
 
@@ -212,8 +221,16 @@ def test_readiness_rejects_missing_dense(runtime):
     readiness = runtime.readiness()
 
     assert readiness.ready is False
+    assert readiness.dense_configured is False
     assert readiness.dense_ready is False
+    assert readiness.fusion_ready is False
+    assert readiness.probe_executed is False
+    assert readiness.probe_ready is False
     assert readiness.fusion_backend == "bm25"
+    probe = _check(readiness, "dense_rrf_probe")
+    assert (probe.ready, probe.detail) == (False, "not executed")
+    assert "Dense backend is not configured" in readiness.errors
+    assert "fusion backend 'bm25' requires 'rrf'" in readiness.errors
 
 
 def test_readiness_rejects_non_rrf_production_path(runtime):
@@ -231,5 +248,35 @@ def test_readiness_rejects_non_rrf_production_path(runtime):
     readiness = runtime.readiness()
 
     assert readiness.ready is False
+    assert readiness.dense_configured is True
+    assert readiness.dense_ready is False
     assert readiness.fusion_backend == "bm25"
-    assert readiness.errors == ()
+    assert readiness.fusion_ready is False
+    assert readiness.probe_executed is False
+    assert readiness.probe_ready is False
+    probe = _check(readiness, "dense_rrf_probe")
+    assert (probe.ready, probe.detail) == (False, "not executed")
+    assert "fusion backend 'bm25' requires 'rrf'" in readiness.errors
+
+
+def test_readiness_reports_failed_dense_probe(runtime):
+    class BrokenDenseRetriever:
+        def search(self, query: str, k: int = 5):
+            raise RuntimeError("embedding unavailable")
+
+    runtime._discovery.dense = BrokenDenseRetriever()
+    readiness = runtime.readiness()
+
+    assert readiness.ready is False
+    assert readiness.dense_configured is True
+    assert readiness.dense_ready is False
+    assert readiness.fusion_ready is True
+    assert readiness.probe_executed is True
+    assert readiness.probe_ready is False
+    probe = _check(readiness, "dense_rrf_probe")
+    assert (probe.ready, probe.detail) == (False, "executed and failed")
+    assert any(
+        "dense/RRF readiness probe failed" in error
+        and "embedding unavailable" in error
+        for error in readiness.errors
+    )

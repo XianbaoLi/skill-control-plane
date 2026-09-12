@@ -104,8 +104,12 @@ class ControlPlaneReadiness:
     ready: bool
     skill_count: int
     retrieval_cards_ready: bool
+    dense_configured: bool
     dense_ready: bool
     fusion_backend: str
+    fusion_ready: bool
+    probe_executed: bool
+    probe_ready: bool
     checks: tuple[ReadinessCheck, ...]
     errors: tuple[str, ...]
 
@@ -337,27 +341,54 @@ class SkillControlPlane:
             name="fusion_backend", ready=fusion_ready,
             detail=fusion_backend))
 
-        dense_ready = dense_configured
-        if retrieval_cards_ready and dense_ready and fusion_ready:
+        probe_executed = False
+        probe_ready = False
+        if retrieval_cards_ready and dense_configured and fusion_ready:
+            probe_executed = True
             try:
                 result = self._discovery.discover_skills(
                     "readiness probe", k=1)
                 if result.backend != "rrf":
                     raise ValueError("readiness probe did not use RRF")
+                probe_ready = True
             except Exception as exc:
-                dense_ready = False
                 errors.append(f"dense/RRF readiness probe failed: {exc}")
-        checks.append(ReadinessCheck(
-            name="dense_rrf_probe", ready=dense_ready,
-            detail="executed" if dense_ready else "not executed"))
+        else:
+            if not dense_configured:
+                errors.append("Dense backend is not configured")
+            if not fusion_ready:
+                errors.append(
+                    f"fusion backend {fusion_backend!r} requires 'rrf'")
 
-        ready = store_check.ready and all(check.ready for check in checks)
+        checks.append(ReadinessCheck(
+            name="dense_rrf_probe",
+            ready=probe_ready,
+            detail=(
+                "executed" if probe_ready
+                else "executed and failed" if probe_executed
+                else "not executed"
+            ),
+        ))
+
+        dense_ready = dense_configured and probe_ready
+        ready = (
+            store_check.ready
+            and retrieval_cards_ready
+            and dense_configured
+            and fusion_ready
+            and probe_executed
+            and probe_ready
+        )
         return ControlPlaneReadiness(
             ready=ready,
             skill_count=len(self._store),
             retrieval_cards_ready=retrieval_cards_ready,
+            dense_configured=dense_configured,
             dense_ready=dense_ready,
             fusion_backend=fusion_backend,
+            fusion_ready=fusion_ready,
+            probe_executed=probe_executed,
+            probe_ready=probe_ready,
             checks=tuple(checks),
             errors=tuple(errors),
         )

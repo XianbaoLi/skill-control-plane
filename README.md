@@ -96,6 +96,17 @@ snapshot = control_plane.context_snapshot()
 Missing, extra, content-hash-stale or wrong-version Cards, or a missing Dense
 backend, are configuration errors. There is no production BM25-only fallback.
 
+`readiness()` returns a structured fail-closed startup check for future adapter
+or sidecar hosts. It requires a loaded Skill Store, complete current Retrieval
+Cards, a configured Dense backend, RRF, and a successful Dense/RRF probe; the
+probe uses Discovery directly and does not mutate Discovery Session state.
+
+`export_state()` and `restore_state()` use versioned `StateSnapshotV1` for
+persistent Capability Memory only: Bundles, member roles, and resident/evicted
+body state. Pending Candidates, search budget, remaining gaps, and other
+Discovery Session turn-local state are not persisted. A successful restore
+creates a clean, new turn-local Discovery Session.
+
 `RuntimeCapabilityHarness` remains importable only from
 `skill_control_plane.runtime.capability_harness` for historical experiments. It
 is deprecated, retains the old combined resolver loader where needed, and is not

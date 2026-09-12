@@ -56,6 +56,8 @@ public API. Its public calls exchange dataclass/DTO values:
 - `load_skill_body()`, `mark_skill_body_evicted()`, and
   `mark_all_skill_bodies_evicted()` own exact body lifecycle;
 - `turn_audit()` returns structured counters, sufficiency, transitions, and gaps.
+- `export_state()` and `restore_state()` transfer versioned `StateSnapshotV1`;
+  `readiness()` returns a structured fail-closed startup DTO.
 
 Core accepts no provider message or tool-call envelope and emits no system prompt,
 native tool schema, or model-specific JSON text. Integration adapters parse strict
@@ -67,6 +69,13 @@ v0.1, no Card is missing or extra, every Card content hash matches its Skill, a
 Dense backend exists, and the fusion path is RRF. Any mismatch is a configuration
 error and startup fails closed. `SkillControlPlane.from_tree()` requires both the
 Retrieval Card corpus and a Dense factory; it does not synthesize either one.
+
+`readiness()` is the explicit startup contract for future adapter and sidecar
+hosts. It reports Skill Store, Retrieval Cards, Dense configuration, fusion
+backend, and a separate Dense/RRF probe. Overall readiness is true only when
+Cards are complete and current, Dense is configured, fusion is RRF, and the probe
+executes successfully. The probe calls Discovery directly, never Discovery
+Session, so it cannot pollute pending Candidates, search counters, or audit.
 
 ## Canonical entities
 
@@ -100,6 +109,17 @@ Candidate set. A new turn resets this state.
 A cross-turn capability composition with a stable ID, reusable purpose and exact
 member `skill_id`s. Each member has role `maintained` or `direct`. A Bundle is not
 a filesystem category, a retrieval result group, or an ordinary Skill grouping.
+
+### State Snapshot V1
+
+`StateSnapshotV1` is the versioned persistent contract for Capability Memory.
+It contains the Skill-store fingerprint plus Bundles with their IDs, purposes,
+members, `member_role`, and `body_state`. It does not contain pending Candidates,
+pending queries, search counts or budgets, remaining gaps, sufficiency state, or
+any other Discovery Session turn-local state. `restore_state()` validates the
+whole snapshot first, then atomically replaces Capability Memory and creates a
+clean new turn-local Discovery Session. Unsupported versions, unknown Skill IDs,
+invalid roles or body states, and Store fingerprint mismatches fail closed.
 
 ### Bundle Card
 
@@ -201,7 +221,8 @@ Cards + BM25 + Dense + RRF and does not silently degrade.
 `runtime/discovery_session.py` is the authority for per-turn search control,
 Candidate Closure, remaining gaps, `COVERED / SEARCH_MORE / UNSATISFIED`, and apply
 eligibility. Model-provided sufficiency fields are rejected; Core derives outcomes
-from validated behavior.
+from validated behavior. Its mutable state is turn-scoped and never enters
+`StateSnapshotV1`; restore creates a new clean session.
 
 ### Runtime — Capability Memory
 
