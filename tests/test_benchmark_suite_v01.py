@@ -11,7 +11,8 @@ import pytest
 from skill_control_plane.benchmarks.models import VERSION, load_tasks, validate_offline_cost, validate_result
 from skill_control_plane.benchmarks.reporter import paired_report
 from skill_control_plane.benchmarks.runner import (assert_gold_isolated,
-    assert_identity_matches_run, materialize_fixture, materialize_host_verifier)
+    assert_identity_matches_run, gated_verifier_server, materialize_fixture,
+    materialize_host_verifier)
 from skill_control_plane.benchmarks.scorer import _check, repeated_discovery_count, required_skill_recall, score_run
 from scripts.benchmark_validate import validate
 
@@ -100,13 +101,14 @@ def test_gated_evidence_is_hidden_until_initial_fix(tmp_path):
     work, host = tmp_path / "work", tmp_path / "host"
     materialize_fixture(spec, work)
     verifier = materialize_host_verifier(spec, host)
-    verifier_env = dict(os.environ, BENCHMARK_VERIFIER=str(verifier))
-    initial = subprocess.run(["python3", "tests/check_all.py"], cwd=work, text=True,
-                             capture_output=True, env=verifier_env)
-    assert initial.returncode != 0 and "BENCHMARK_EVIDENCE:E1" not in initial.stdout + initial.stderr
-    (work / "src/server.js").write_text("// validated name returns 400 or 201\n")
-    advanced = subprocess.run(["python3", "tests/check_all.py"], cwd=work, text=True,
-                              capture_output=True, env=verifier_env)
+    with gated_verifier_server(verifier, tmp_path / "verifier.sock", work) as socket_path:
+        verifier_env = dict(os.environ, BENCHMARK_VERIFIER_CHANNEL=str(socket_path))
+        initial = subprocess.run(["python3", "tests/check_all.py"], cwd=work, text=True,
+                                 capture_output=True, env=verifier_env)
+        assert initial.returncode != 0 and "BENCHMARK_EVIDENCE:E1" not in initial.stdout + initial.stderr
+        (work / "src/server.js").write_text("// validated name returns 400 or 201\n")
+        advanced = subprocess.run(["python3", "tests/check_all.py"], cwd=work, text=True,
+                                  capture_output=True, env=verifier_env)
     assert advanced.returncode != 0 and "BENCHMARK_EVIDENCE:E1" in advanced.stdout + advanced.stderr
 
 
@@ -138,6 +140,8 @@ def test_gold_isolation_covers_all_agent_visible_projections():
     assert_gold_isolated(task, fixture, {"system_context_projection": {}, "tool_descriptions": {}})
     with pytest.raises(ValueError, match="gold exposed"):
         assert_gold_isolated(task, fixture, {"tool_descriptions": {"required_skills": ["x"]}})
+    runner_source = (ROOT / "src/skill_control_plane/benchmarks/runner.py").read_text()
+    assert '"BENCHMARK_VERIFIER":' not in runner_source
 
 
 def test_production_bridge_has_tool_parity_and_real_resume_path():

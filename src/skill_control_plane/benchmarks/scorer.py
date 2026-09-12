@@ -58,16 +58,13 @@ def _check(check: dict[str, Any], workspace: Path,
             ok = False
         return ok, f"{path}: semantic JSON contract {'satisfied' if ok else 'failed'}"
     if kind == "command":
-        env = None
-        if verifier is not None:
-            import os
-            env = dict(os.environ, BENCHMARK_VERIFIER=str(verifier))
-        argv = list(check["argv"])
+        argv = ([sys.executable, str(verifier)] if verifier is not None
+                else list(check["argv"]))
         if argv and argv[0] == "python":
             argv[0] = sys.executable
         try:
             completed = subprocess.run(argv, cwd=workspace, capture_output=True,
-                                       text=True, timeout=check.get("timeout_seconds", 30), env=env)
+                                       text=True, timeout=check.get("timeout_seconds", 30))
         except OSError as exc:
             return False, f"unable to execute verifier: {exc}"
         return completed.returncode == 0, (completed.stdout + completed.stderr)[-1000:]
