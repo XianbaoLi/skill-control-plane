@@ -49,6 +49,7 @@ from skill_control_plane.discovery import (
     load_retrieval_cards,
     write_dense_index,
 )
+from skill_control_plane.discovery.bigmodel import BigModelEmbeddingClient
 
 
 def _build_parser() -> argparse.ArgumentParser:
