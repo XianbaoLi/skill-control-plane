@@ -19,6 +19,12 @@ def metadata_text(skill: SkillRecord) -> str:
     return "\n".join(part for part in parts if part)
 
 
+def dense_text(skill: SkillRecord) -> str:
+    """Return the exact text bound to the production Dense index."""
+
+    return skill.retrieval_representation or metadata_text(skill)
+
+
 def _to_vector(value: Any) -> list[float]:
     if hasattr(value, "tolist"):
         value = value.tolist()

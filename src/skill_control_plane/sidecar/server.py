@@ -10,9 +10,9 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, TextIO
 
-from skill_control_plane.discovery.bigmodel import (
-    BigModelDenseRetriever,
-    BigModelEmbeddingClient,
+from skill_control_plane.discovery.bigmodel import BigModelEmbeddingClient
+from skill_control_plane.discovery.dense_index import (
+    load_precomputed_dense_retriever,
 )
 from skill_control_plane.runtime import (
     CapabilityDecision,
@@ -315,6 +315,7 @@ def build_sidecar_server(
     *,
     skill_root: str | Path,
     retrieval_cards: str | Path,
+    dense_index: str | Path,
     max_searches_per_turn: int = 3,
     embedding_client_factory: Callable[
         [], BigModelEmbeddingClient] = BigModelEmbeddingClient,
@@ -325,9 +326,10 @@ def build_sidecar_server(
             skill_root,
             retrieval_cards=retrieval_cards,
             max_searches_per_turn=max_searches_per_turn,
-            dense_factory=lambda records: BigModelDenseRetriever(
+            dense_factory=lambda records: load_precomputed_dense_retriever(
+                dense_index,
                 records,
-                model_name=embedding.model,
+                embedding_model=embedding.model,
                 dimensions=embedding.dimensions,
                 embed_batch=embedding,
             ),
@@ -347,6 +349,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--retrieval-cards", required=True, help="RetrievalCard v0.1 JSONL"
     )
     parser.add_argument(
+        "--dense-index", required=True, help="DenseIndexV1 JSON file"
+    )
+    parser.add_argument(
         "--max-searches-per-turn", type=int, default=3,
         help="Positive per-turn search budget",
     )
@@ -360,6 +365,7 @@ def main(argv: list[str] | None = None) -> int:
     server = build_sidecar_server(
         skill_root=args.skill_root,
         retrieval_cards=args.retrieval_cards,
+        dense_index=args.dense_index,
         max_searches_per_turn=args.max_searches_per_turn,
     )
     return server.serve_binary(sys.stdin.buffer, sys.stdout.buffer)

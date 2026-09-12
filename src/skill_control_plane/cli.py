@@ -44,8 +44,10 @@ from skill_control_plane.discovery import (
     RETRIEVAL_CARD_FIELDS,
     RETRIEVAL_CARD_VERSION,
     apply_retrieval_cards,
+    build_dense_index,
     build_retrieval_card_cache,
     load_retrieval_cards,
+    write_dense_index,
 )
 
 
@@ -80,6 +82,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="Ignore matching cached cards and regenerate all Skills",
+    )
+
+    dense_index = corpus_subparsers.add_parser(
+        "dense-index",
+        help="Build DenseIndexV1 corpus embeddings offline",
+    )
+    dense_index.add_argument("root", help="Local Skill tree")
+    dense_index.add_argument("--output", required=True, help="DenseIndexV1 JSON")
+    dense_index.add_argument(
+        "--retrieval-cards", required=True, help="RetrievalCard v0.1 JSONL"
     )
 
     eval_parser = subparsers.add_parser("eval", help="Evaluation utilities")
@@ -839,6 +851,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 indent=2,
             )
         )
+        return 0
+
+    if args.command == "corpus" and args.corpus_command == "dense-index":
+        index = build_dense_index(
+            skill_root=args.root,
+            retrieval_cards=args.retrieval_cards,
+            embedding_client=BigModelEmbeddingClient(),
+        )
+        output = write_dense_index(index, args.output)
+        print(json.dumps({
+            "version": index.version,
+            "embedding_model": index.embedding_model,
+            "dimensions": index.dimensions,
+            "record_count": len(index.records),
+            "output": str(output),
+        }, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "eval" and args.eval_command == "retrieval":

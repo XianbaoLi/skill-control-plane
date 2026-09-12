@@ -59,6 +59,12 @@ Supported methods are:
 `mark_skill_body_evicted`, `mark_all_skill_bodies_evicted`, `turn_audit`,
 `export_state`, `restore_state`, and `shutdown`.
 
+Production startup requires a compatible `DenseIndexV1` artifact. The sidecar
+loads it before Core construction and performs only query embedding at runtime;
+it never re-embeds the corpus. Missing or stale indexes keep the minimal
+protocol server in the fail-closed unready state below. Corpus embeddings are
+built offline.
+
 `handshake` must be the first Adapter call. Its result contains
 `protocol_version`, the DTO from `SkillControlPlane.readiness()`, and
 `supported_methods`. If production initialization fails, the sidecar stays

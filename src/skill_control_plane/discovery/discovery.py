@@ -6,7 +6,7 @@ from skill_control_plane.models import RetrievalCandidate, SkillRecord
 from skill_control_plane.registry import SkillStore
 from .base import Retriever
 from .bm25 import BM25Retriever
-from .dense import metadata_text
+from .dense import dense_text
 from .fusion import reciprocal_rank_fusion
 
 
@@ -31,24 +31,10 @@ class SkillDiscovery:
         self.registry = registry
         self.retrieval_cards = dict(retrieval_cards or {})
         self.records = {s.skill_id: s for s in registry}
-        records = tuple(registry)
-        if self.retrieval_cards:
-            indexed_records = tuple(
-                replace(
-                    skill,
-                    description="\n".join(part for part in (
-                        skill.description,
-                        self.retrieval_cards[skill.skill_id].augmentation_text(),
-                    ) if part),
-                    body="",
-                ) if skill.skill_id in self.retrieval_cards else skill
-                for skill in records
-            )
-        else:
-            indexed_records = records
+        records = indexed_skill_records(registry, self.retrieval_cards)
         self.texts = {
-            skill.skill_id: indexed.retrieval_representation or metadata_text(indexed)
-            for skill, indexed in zip(records, indexed_records, strict=True)
+            skill.skill_id: dense_text(skill)
+            for skill in records
         }
         indexed = tuple(replace(s, name="", description=self.texts[s.skill_id],
                                 tags=(), body="") for s in registry)
@@ -140,3 +126,20 @@ class SkillDiscovery:
 
 def discover_skills(query: str, k: int = 5, *, discovery: SkillDiscovery) -> SkillDiscoveryResult:
     return discovery.discover_skills(query, k)
+
+
+def indexed_skill_records(registry, retrieval_cards) -> tuple[SkillRecord, ...]:
+    """Return the exact Skill records used to build Discovery indexes."""
+
+    cards = dict(retrieval_cards or {})
+    return tuple(
+        replace(
+            skill,
+            description="\n".join(part for part in (
+                skill.description,
+                cards[skill.skill_id].augmentation_text(),
+            ) if part),
+            body="",
+        ) if skill.skill_id in cards else skill
+        for skill in registry
+    )

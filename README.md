@@ -117,7 +117,8 @@ A Python NDJSON stdio sidecar is available for future native adapters:
 ```bash
 python -m skill_control_plane.sidecar \
   --skill-root /path/to/skills \
-  --retrieval-cards /path/to/retrieval-cards-v0.1.jsonl
+  --retrieval-cards /path/to/retrieval-cards-v0.1.jsonl \
+  --dense-index /path/to/dense-index-v1.json
 ```
 
 Corpus and evaluation commands are available through `skill-control-plane --help`.

@@ -17,6 +17,10 @@ from skill_control_plane import (
     StateSnapshotMemberV1,
     StateSnapshotV1,
 )
+from skill_control_plane.discovery import (
+    build_dense_index,
+    write_dense_index,
+)
 from skill_control_plane.sidecar import (
     PROTOCOL_VERSION,
     SUPPORTED_METHODS,
@@ -119,6 +123,15 @@ def test_duplicate_and_unknown_envelope_fields(server):
     assert response["error"]["code"] == "INVALID_REQUEST"
     response = _call(server, "handshake", {"extra": True})
     assert response["error"]["code"] == "INVALID_PARAMS"
+
+
+def test_unknown_envelope_field_preserves_valid_id(server):
+    payload = {
+        "id": "abc", "method": "handshake", "params": {}, "extra": True,
+    }
+    response = server.handle_line(json.dumps(payload))
+    assert response["id"] == "abc"
+    assert response["error"]["code"] == "INVALID_REQUEST"
 
 
 @pytest.mark.parametrize("payload", [
@@ -389,7 +402,7 @@ def _write_cards(store, path):
     ), encoding="utf-8")
 
 
-def test_production_startup_constructs_offline_dense_factory(tmp_path):
+def test_production_sidecar_uses_precomputed_dense_index(tmp_path):
     for name, description in [
         ("ocr", "extract scanned text"),
         ("slides", "create slides"),
@@ -408,20 +421,75 @@ def test_production_startup_constructs_offline_dense_factory(tmp_path):
         model = "embedding-3"
         dimensions = 2
 
+        def __init__(self) -> None:
+            self.corpus_calls = []
+            self.query_calls = []
+
         def __call__(self, texts):
+            if len(texts) > 1:
+                self.corpus_calls.append(tuple(texts))
+            else:
+                self.query_calls.append(texts[0])
             return [[1.0, 0.0] for _ in texts]
+
+    embedding = OfflineEmbedding()
+    index = build_dense_index(
+        skill_root=tmp_path,
+        retrieval_cards=card_path,
+        embedding_client=embedding,
+    )
+    index_path = write_dense_index(index, tmp_path / "dense-index.json")
+    corpus_calls_before = list(embedding.corpus_calls)
 
     server = build_sidecar_server(
         skill_root=tmp_path,
         retrieval_cards=card_path,
-        embedding_client_factory=OfflineEmbedding,
+        dense_index=index_path,
+        embedding_client_factory=lambda: embedding,
     )
     readiness = _call(server, "handshake")["result"]["readiness"]
 
     assert readiness["ready"] is True
     assert readiness["dense_ready"] is True
     assert readiness["fusion_backend"] == "rrf"
+    assert embedding.corpus_calls == corpus_calls_before
+    assert embedding.query_calls == ["readiness probe"]
 
+    search = _call(server, "search_capability", {"need": "create slides"})
+    assert search["ok"] is True
+    assert search["result"]["retrieval_trace"]["backend"] == "rrf"
+    assert len(embedding.query_calls) == 2
+
+
+def test_unready_dense_index_fails_closed_without_bm25_fallback(tmp_path):
+    class OfflineEmbedding:
+        model = "embedding-3"
+        dimensions = 2
+
+        def __call__(self, texts):
+            return [[1.0, 0.0] for _ in texts]
+
+    skill_dir = tmp_path / "slides"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: slides\ndescription: create slides\n---\nBODY\n",
+        encoding="utf-8",
+    )
+    card_path = tmp_path / "cards.jsonl"
+    _write_cards(_store(), card_path)
+    server = build_sidecar_server(
+        skill_root=tmp_path,
+        retrieval_cards=card_path,
+        dense_index=tmp_path / "missing.json",
+        embedding_client_factory=OfflineEmbedding,
+    )
+    readiness = _call(server, "handshake")["result"]["readiness"]
+    search = _call(server, "search_capability", {"need": "slides"})
+
+    assert readiness["ready"] is False
+    assert readiness["probe_executed"] is False
+    assert "cannot load Dense Index" in readiness["errors"][0]
+    assert search["error"]["code"] == "NOT_READY"
 
 def test_production_startup_fails_without_credential(tmp_path):
     skill_dir = tmp_path / "slides"
@@ -437,7 +505,8 @@ def test_production_startup_fails_without_credential(tmp_path):
     monkeypatch.delenv("BIGMODEL_API_KEY", raising=False)
     try:
         server = build_sidecar_server(
-            skill_root=tmp_path, retrieval_cards=card_path
+            skill_root=tmp_path, retrieval_cards=card_path,
+            dense_index=tmp_path / "missing.json",
         )
     finally:
         monkeypatch.undo()

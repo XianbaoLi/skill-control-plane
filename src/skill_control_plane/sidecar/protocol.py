@@ -85,8 +85,12 @@ def parse_request(line: str) -> Request:
 
     if not isinstance(payload, dict):
         raise ProtocolError(INVALID_REQUEST, "request must be a JSON object")
+    payload_id = payload.get("id")
+    valid_id = payload_id if isinstance(payload_id, str) and payload_id else None
     if set(payload) - {"id", "method", "params"}:
-        raise ProtocolError(INVALID_REQUEST, "request has unknown fields")
+        raise ProtocolError(
+            INVALID_REQUEST, "request has unknown fields", response_id=valid_id
+        )
 
     request_id = payload.get("id")
     if not isinstance(request_id, str) or not request_id:
