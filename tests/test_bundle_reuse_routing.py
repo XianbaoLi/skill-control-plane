@@ -75,7 +75,9 @@ def test_compact_bundle_capabilities_are_structured_deduplicated_and_bounded():
         'x' * 95 + '…',
     ]
     assert all(len(phrase) <= 96 for phrase in bundle['capabilities'])
-    assert set(bundle['members'][0]) == {'skill_id', 'name', 'body_state'}
+    assert set(bundle['members'][0]) == {
+        'skill_id', 'name', 'member_role', 'body_state'}
+    assert bundle['members'][0]['member_role'] == 'maintained'
     assert 'presentation metadata' not in surface
     assert 'PRIVATE_POWERPOINT_BODY' not in surface
     assert 'cue' not in surface
@@ -88,7 +90,7 @@ def test_old_bundle_surface_is_available_only_for_controlled_ab():
         'maintained_bundles'][0]
     assert len(old['capabilities']) == 8
     assert set(old['members'][0]) == {
-        'skill_id', 'name', 'short_description', 'body_state'}
+        'skill_id', 'name', 'member_role', 'short_description', 'body_state'}
     assert old['members'][0]['short_description'] == 'presentation metadata'
 
 

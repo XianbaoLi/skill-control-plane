@@ -17,12 +17,14 @@ class ActiveBundle:
 
 
 BodyState = Literal["resident", "evicted"]
+MemberRole = Literal["maintained", "direct"]
 
 
 @dataclass(frozen=True, slots=True)
 class BundleMemberSnapshot:
     skill_id: str
     name: str
+    member_role: MemberRole
     body_state: BodyState
     short_description: str | None = None
 
@@ -67,21 +69,71 @@ class SkillBodyLoadResult:
 class RuntimeCapabilityState:
     """Serializable runtime state retained for compatibility with V0.x callers.
 
-    ``direct_skills`` are temporary model-context activations.  They are never
-    rendered as, or committed into, the maintained Bundle memory surface.
+    ``bundle_member_roles`` is the canonical V1 role state. ``direct_skills`` is
+    retained as a deprecated compatibility projection, plus any detached DIRECT
+    IDs loaded from a V0.x state. New V1 commits never create detached DIRECT IDs.
     """
 
     active_bundles: list[ActiveBundle] = field(default_factory=list)
     direct_skills: set[str] = field(default_factory=set)
     skill_body_states: dict[str, BodyState] = field(default_factory=dict)
+    bundle_member_roles: dict[str, dict[str, MemberRole]] = field(
+        default_factory=dict)
 
     def __post_init__(self) -> None:
+        self.active_bundles = list(self.active_bundles)
+        self.direct_skills = set(self.direct_skills)
+        self.skill_body_states = dict(self.skill_body_states)
+        self.bundle_member_roles = {
+            bundle_id: dict(member_roles)
+            for bundle_id, member_roles in self.bundle_member_roles.items()
+        }
         for bundle in self.active_bundles:
+            roles = self.bundle_member_roles.setdefault(bundle.bundle_id, {})
             for skill_id in bundle.skill_ids:
                 self.skill_body_states.setdefault(skill_id, "evicted")
+                roles.setdefault(
+                    skill_id,
+                    "direct" if skill_id in self.direct_skills else "maintained",
+                )
+                if roles[skill_id] == "direct":
+                    self.direct_skills.add(skill_id)
+        bundle_skills = {
+            skill_id for bundle in self.active_bundles
+            for skill_id in bundle.skill_ids
+        }
+        self.direct_skills = {
+            *(self.direct_skills - bundle_skills),
+            *(skill_id for roles in self.bundle_member_roles.values()
+              for skill_id, role in roles.items() if role == "direct"),
+        }
+
+
+def _ensure_compatibility_shape(state: RuntimeCapabilityState) -> None:
+    """Add V1 role metadata to mutable V0.x state objects at the boundary."""
+
+    if not hasattr(state, "bundle_member_roles"):
+        state.bundle_member_roles = {}
+    for bundle in state.active_bundles:
+        roles = state.bundle_member_roles.setdefault(bundle.bundle_id, {})
+        for skill_id in bundle.skill_ids:
+            roles.setdefault(
+                skill_id,
+                "direct" if skill_id in state.direct_skills else "maintained",
+            )
+    bundle_skills = {
+        skill_id for bundle in state.active_bundles
+        for skill_id in bundle.skill_ids
+    }
+    state.direct_skills = {
+        *(state.direct_skills - bundle_skills),
+        *(skill_id for roles in state.bundle_member_roles.values()
+          for skill_id, role in roles.items() if role == "direct"),
+    }
 
 
 def validate_state(state: RuntimeCapabilityState, store: SkillStore) -> None:
+    _ensure_compatibility_shape(state)
     bundle_ids = [bundle.bundle_id for bundle in state.active_bundles]
     if len(bundle_ids) != len(set(bundle_ids)):
         raise ValueError("duplicate active bundle id")
@@ -94,7 +146,14 @@ def validate_state(state: RuntimeCapabilityState, store: SkillStore) -> None:
             raise ValueError("active bundle requires id, purpose and skills")
         if len(bundle.skill_ids) != len(set(bundle.skill_ids)) or set(bundle.skill_ids) - known:
             raise ValueError("unknown or duplicate active bundle skill")
+        roles = state.bundle_member_roles.get(bundle.bundle_id)
+        if roles is None or set(roles) != set(bundle.skill_ids):
+            raise ValueError("member role must exist exactly for Bundle members")
+        if set(roles.values()) - {"maintained", "direct"}:
+            raise ValueError("invalid Bundle member role")
         bundle_skills.update(bundle.skill_ids)
+    if set(state.bundle_member_roles) != set(bundle_ids):
+        raise ValueError("member roles must exist exactly for active Bundles")
     if set(state.skill_body_states) != bundle_skills:
         raise ValueError("body state must exist exactly for Bundle members")
     if set(state.skill_body_states.values()) - {"resident", "evicted"}:
@@ -212,6 +271,8 @@ class CapabilityMemory:
                         BundleMemberSnapshot(
                             skill_id=skill_id,
                             name=self.store.get(skill_id).name,
+                            member_role=self.state.bundle_member_roles[
+                                bundle.bundle_id][skill_id],
                             body_state=self.state.skill_body_states[skill_id],
                             short_description=(None if compact else " ".join(
                                 self.store.get(skill_id).description.split())[:240]),
@@ -235,12 +296,29 @@ class CapabilityMemory:
         for skill_id in skill_ids:
             self.store.get(skill_id)
         active = list(self.state.active_bundles)
-        direct = set(self.state.direct_skills)
+        roles = {
+            bundle_id: dict(member_roles)
+            for bundle_id, member_roles in self.state.bundle_member_roles.items()
+        }
+        previous_bundle_skills = {
+            skill_id for bundle in active for skill_id in bundle.skill_ids
+        }
+        detached_legacy_direct = (
+            set(self.state.direct_skills) - previous_bundle_skills)
         target = None
         if action == "DIRECT":
-            direct.update(skill_ids)
-        elif action == "EXTEND":
             target = target_bundle_id
+            existing = next((
+                bundle for bundle in active if bundle.bundle_id == target
+            ), None)
+            if existing is None:
+                raise ValueError("DIRECT requires an existing target Bundle")
+            new_skill_ids = tuple(
+                skill_id for skill_id in skill_ids
+                if skill_id not in existing.skill_ids
+            )
+            if not new_skill_ids:
+                raise ValueError("DIRECT requires at least one new Bundle member")
             active = [
                 ActiveBundle(
                     bundle.bundle_id,
@@ -249,16 +327,56 @@ class CapabilityMemory:
                 ) if bundle.bundle_id == target else bundle
                 for bundle in active
             ]
+            roles[target].update((skill_id, "direct") for skill_id in new_skill_ids)
+        elif action == "EXTEND":
+            target = target_bundle_id
+            existing = next((
+                bundle for bundle in active if bundle.bundle_id == target
+            ), None)
+            if existing is None:
+                raise ValueError("EXTEND requires an existing target Bundle")
+            new_skill_ids = tuple(
+                skill_id for skill_id in skill_ids
+                if skill_id not in existing.skill_ids
+            )
+            if not new_skill_ids:
+                raise ValueError("EXTEND requires at least one new Bundle member")
+            active = [
+                ActiveBundle(
+                    bundle.bundle_id,
+                    bundle.purpose,
+                    tuple(dict.fromkeys((*bundle.skill_ids, *skill_ids))),
+                ) if bundle.bundle_id == target else bundle
+                for bundle in active
+            ]
+            roles[target].update(
+                (skill_id, "maintained") for skill_id in new_skill_ids)
+            detached_legacy_direct.difference_update(skill_ids)
         elif action == "CREATE":
+            if not isinstance(purpose, str) or not purpose.strip():
+                raise ValueError("CREATE requires non-empty purpose")
             target = "cap-" + uuid4().hex
             while target in {bundle.bundle_id for bundle in active}:
                 target = "cap-" + uuid4().hex
             active.append(ActiveBundle(target, purpose or "", skill_ids))
+            roles[target] = {skill_id: "maintained" for skill_id in skill_ids}
+            detached_legacy_direct.difference_update(skill_ids)
         else:
             raise ValueError("unknown capability action")
 
+        direct = set(detached_legacy_direct)
+        direct.update(
+            skill_id
+            for member_roles in roles.values()
+            for skill_id, role in member_roles.items()
+            if role == "direct"
+        )
         next_state = RuntimeCapabilityState(
-            active, direct, dict(self.state.skill_body_states))
+            active,
+            direct,
+            dict(self.state.skill_body_states),
+            roles,
+        )
         bundle_skill_ids = {
             skill_id for bundle in next_state.active_bundles
             for skill_id in bundle.skill_ids

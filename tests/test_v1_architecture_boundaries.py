@@ -20,7 +20,12 @@ from skill_control_plane.integrations.reference_agent import (
 )
 from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillStore
-from skill_control_plane.runtime import CapabilityMemory, DiscoverySession
+from skill_control_plane.runtime import (
+    ActiveBundle,
+    CapabilityMemory,
+    DiscoverySession,
+    RuntimeCapabilityState,
+)
 from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
 from tests.support import (
     DeterministicFakeDenseRetriever,
@@ -103,10 +108,12 @@ def test_reference_agent_registers_exactly_three_capability_tools():
     assert len(CAPABILITY_TOOLS) == 3
 
 
-def test_discovery_session_owns_closure_and_sufficiency_without_bundle_commit():
+def test_discovery_session_owns_closure_and_sufficiency_with_direct_bundle_member():
     store = _store()
     discovery = SkillDiscovery(store)
-    memory = CapabilityMemory(store)
+    memory = CapabilityMemory(store, RuntimeCapabilityState([
+        ActiveBundle("documents", "Document work", ("slides",)),
+    ]))
     session = DiscoverySession(discovery, memory)
 
     session.search("extract scanned text")
@@ -115,6 +122,7 @@ def test_discovery_session_owns_closure_and_sufficiency_without_bundle_commit():
         action="DIRECT",
         skill_ids=("ocr",),
         reason="one-turn operation",
+        target_bundle_id="documents",
         coverage=(CoverageClaim("scan", "skill:ocr"),),
         remaining_gaps=(),
     ))
@@ -122,7 +130,9 @@ def test_discovery_session_owns_closure_and_sufficiency_without_bundle_commit():
     assert [(body.skill_id, body.body) for body in result.skill_bodies] == [
         ("ocr", "OCR BODY")]
     assert session.audit().capability_sufficiency_outcome == "COVERED"
-    assert memory.snapshot().maintained_bundles == ()
+    bundle = memory.snapshot().maintained_bundles[0]
+    assert [(member.skill_id, member.member_role) for member in bundle.members] == [
+        ("ocr", "direct"), ("slides", "maintained")]
 
 
 def test_capability_memory_owns_bundle_body_residency_and_exact_reload():
@@ -234,6 +244,7 @@ def test_strict_tool_argument_parsing_is_public_integration_behavior():
         "action": "DIRECT",
         "skill_ids": ["ocr"],
         "reason": "one turn",
+        "target_bundle_id": "documents",
         "coverage": [{"need": "scan", "covered_by": "skill:ocr"}],
         "remaining_gaps": [],
     }))
@@ -250,9 +261,10 @@ def test_historical_harness_is_deprecated_compatible_and_not_formal_api():
     result = harness.search_capability("extract scanned text")
     assert result.candidates[0].skill_id == "ocr"
     applied = harness.apply_capability({
-        "action": "DIRECT",
+        "action": "CREATE",
         "skill_ids": ["ocr"],
         "reason": "historical experiment",
+        "purpose": "Document scans",
         "coverage": [{"need": "scan", "covered_by": "skill:ocr"}],
         "remaining_gaps": [],
     })

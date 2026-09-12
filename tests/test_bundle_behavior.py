@@ -84,9 +84,8 @@ class ScriptedConversation:
             'remaining_gaps': [], **action})
 
 
-@pytest.mark.parametrize('unrelated', ['DIRECT', 'CREATE'])
-def test_four_turns_preserve_history_extend_related_and_separate_unrelated(discovery, unrelated):
-    client = ScriptedConversation(unrelated)
+def test_four_turns_preserve_history_extend_related_and_create_unrelated(discovery):
+    client = ScriptedConversation('CREATE')
     checkpoints = []
     report = run_experiment(discovery, client, checkpoint=lambda r: checkpoints.append(deepcopy(r)))
     assert report['status'] == 'completed'

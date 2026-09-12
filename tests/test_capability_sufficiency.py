@@ -43,7 +43,8 @@ class Client:
 
 def decision(skill_ids, *, remaining_gaps=(), bundle_coverage=()):
     return {
-        'action': 'DIRECT', 'skill_ids': list(skill_ids), 'reason': 'credible match',
+        'action': 'CREATE', 'skill_ids': list(skill_ids), 'reason': 'credible match',
+        'purpose': 'Task capabilities',
         'coverage': [
             *({'need': need, 'covered_by': f'bundle:{bundle_id}'}
               for need, bundle_id in bundle_coverage),
@@ -87,7 +88,9 @@ def test_partial_commit_preserves_gap_without_model_supplied_outcome():
     runtime.search_capability('OCR')
     partial = decision(('ocr',), remaining_gaps=('control a quantum teleporter',))
     result = runtime.apply_capability(parsed(partial))
-    assert set(runtime.context_snapshot().direct_skill_ids) == {'ocr'}
+    assert runtime.context_snapshot().direct_skill_ids == ()
+    assert runtime.context_snapshot().maintained_bundles[0].members[0].member_role \
+        == 'maintained'
     payload = dto_payload(result)
     assert 'sufficiency' not in payload
     assert payload['remaining_gaps'] == ['control a quantum teleporter']

@@ -41,6 +41,12 @@ def state_of(control_plane):
         ) for bundle in snapshot.maintained_bundles],
         direct_skills=set(snapshot.direct_skill_ids),
         skill_body_states=snapshot.skill_body_states,
+        bundle_member_roles={
+            bundle.bundle_id: {
+                member.skill_id: member.member_role for member in bundle.members
+            }
+            for bundle in snapshot.maintained_bundles
+        },
     )
 
 
@@ -67,7 +73,7 @@ def load(need='extract PDF text and presentation slides'):
     return tool('load_capability', {'need': need})
 
 
-def apply(action='DIRECT', **kwargs):
+def apply(action='CREATE', **kwargs):
     skill_ids = kwargs.get('skill_ids', ['pdf'])
     audited = {
         'coverage': [
@@ -76,6 +82,8 @@ def apply(action='DIRECT', **kwargs):
         ],
         'remaining_gaps': [],
     }
+    if action == 'CREATE' and 'purpose' not in kwargs:
+        kwargs['purpose'] = 'Task capabilities'
     return tool('apply_capability', {
         'action': action, 'skill_ids': ['pdf'], 'reason': 'task need',
         **audited, **kwargs})
@@ -111,7 +119,7 @@ def test_native_search_apply_bodies_history_and_bundle_surface(harness, action):
         assert all(set(c) == {'skill_id', 'name', 'description', 'rank',
                               'minimal_evidence'} for c in result['candidates'])
         kwargs = {'purpose': 'Documents'} if action == 'CREATE' else {}
-        if action == 'EXTEND':
+        if action in {'DIRECT', 'EXTEND'}:
             kwargs['target_bundle_id'] = 'mail-work'
         return apply(action, **kwargs)
     client = ScriptedClient([load(), check_search, FINAL])
@@ -134,6 +142,9 @@ def test_native_search_apply_bodies_history_and_bundle_surface(harness, action):
     surface = json.loads(last[0]['content'].split('Runtime Bundles (metadata only)\n')[1])
     if action == 'DIRECT':
         assert len(surface['maintained_bundles']) == 1
+        members = surface['maintained_bundles'][0]['members']
+        assert {member['skill_id']: member['member_role'] for member in members} == {
+            'mail': 'maintained', 'pdf': 'direct'}
     elif action == 'EXTEND':
         assert [m['skill_id'] for m in surface['maintained_bundles'][0]['members']] == ['mail', 'pdf']
     else:
@@ -161,12 +172,15 @@ def test_invalid_native_application_preserves_state_and_pairs_error_result(harne
 
 
 def test_merged_candidates_and_single_use(harness):
+    harness = make_runtime(RuntimeCapabilityState([
+        ActiveBundle('task-work', 'Task work', ('slides',))]))
     first = harness.search_capability('PDF')
     second = harness.search_capability('email inbox')
     assert [c.skill_id for c in first.candidates] == ['pdf']
     assert [c.skill_id for c in second.candidates] == ['mail']
     assert set(harness.context_snapshot().pending_candidate_skill_ids) == {'pdf', 'mail'}
     decision = {'action': 'DIRECT', 'skill_ids': ['pdf', 'mail'], 'reason': 'x',
+                'target_bundle_id': 'task-work',
                 'coverage': [
                     {'need': 'PDF', 'covered_by': 'skill:pdf'},
                     {'need': 'mail', 'covered_by': 'skill:mail'}],
@@ -190,7 +204,7 @@ def test_multiple_loads_multi_direct_and_repeated_selection_across_runs(harness)
     agent.run('Maintain documents')
     assert client.calls[4][1:-1] == previous
     agent.run('Use earlier instructions')
-    assert set(harness.context_snapshot().direct_skill_ids) == {'pdf'}
+    assert harness.context_snapshot().direct_skill_ids == ()
     assert loaded_skill_ids(harness) == ('pdf', 'slides')
     for marker in ('PDF_BODY_ONLY_SELECTED', 'SLIDES_BODY_ONLY_SELECTED'):
         assert json.dumps(agent.history).count(marker) == 1
@@ -284,7 +298,8 @@ def test_failed_new_search_preserves_previous_candidates(harness, monkeypatch):
         harness.search_capability('email')
     assert harness.context_snapshot().pending_candidate_skill_ids == previous_ids
     harness.apply_capability(parsed_decision({
-        'action': 'DIRECT', 'skill_ids': ['pdf'], 'reason': 'x',
+        'action': 'CREATE', 'skill_ids': ['pdf'], 'reason': 'x',
+        'purpose': 'PDF work',
         'coverage': [{'need': 'PDF', 'covered_by': 'skill:pdf'}],
         'remaining_gaps': []}))
 
@@ -293,7 +308,8 @@ def test_empty_search_cannot_apply(harness):
     assert not harness.search_capability('zzzznonexistent').candidates
     with pytest.raises(ValueError, match='outside supplied'):
         harness.apply_capability(parsed_decision({
-            'action': 'DIRECT', 'skill_ids': ['pdf'], 'reason': 'x',
+            'action': 'CREATE', 'skill_ids': ['pdf'], 'reason': 'x',
+            'purpose': 'PDF work',
             'coverage': [{'need': 'PDF', 'covered_by': 'skill:pdf'}],
             'remaining_gaps': []}))
 
@@ -318,7 +334,8 @@ def test_bundle_surface_uses_member_metadata_only(harness):
     assert [b['bundle_id'] for b in data['maintained_bundles']] == ['a', 'z']
     member = data['maintained_bundles'][1]['members'][0]
     assert member['name'] == 'PDF'
-    assert set(member) == {'skill_id', 'name', 'body_state'}
+    assert set(member) == {'skill_id', 'name', 'member_role', 'body_state'}
+    assert member['member_role'] == 'maintained'
     assert 'short_description' not in surface
     assert all(s not in surface for s in ['SECRET_CARD', 'BODY_', 'hidden'])
 
@@ -398,7 +415,7 @@ def test_multi_search_retry_and_search_local_history(harness, bad):
     agent = ExperimentalSkillAgent(harness, ScriptedClient([
         load('PDF'), load('email inbox'), bad, retry, FINAL]))
     agent.run('two capabilities')
-    assert set(harness.context_snapshot().direct_skill_ids) == {'pdf', 'mail'}
+    assert harness.context_snapshot().direct_skill_ids == ()
     assert agent.trace[2]['pending_pool_before'] == agent.trace[2]['pending_pool_after'] == ['pdf', 'mail']
     assert agent.trace[3]['pending_pool_after'] == []
 
@@ -447,12 +464,12 @@ def test_second_search_provider_failure_can_recover_in_same_agent(harness, monke
     assert agent.trace[1]['pending_pool_before'] == agent.trace[1]['pending_pool_after'] == ['pdf']
     assert agent.trace[1]['state_before'] == agent.trace[1]['state_after']
     assert agent.trace[1]['tool_error']['type'] == 'RuntimeError'
-    assert set(harness.context_snapshot().direct_skill_ids) == {'pdf'}
+    assert harness.context_snapshot().direct_skill_ids == ()
 
 
 def test_missing_reason_preserves_pool_for_retry(harness):
     missing = tool('apply_capability', {
-        'action': 'DIRECT', 'skill_ids': ['pdf'],
+        'action': 'CREATE', 'skill_ids': ['pdf'], 'purpose': 'PDF work',
         'coverage': [{'need': 'PDF', 'covered_by': 'skill:pdf'}],
         'remaining_gaps': []})
     agent = ExperimentalSkillAgent(harness, ScriptedClient([load('PDF'), missing, apply(), FINAL]))
@@ -460,7 +477,7 @@ def test_missing_reason_preserves_pool_for_retry(harness):
     assert agent.trace[1]['tool_error']['type'] == 'ValueError'
     assert agent.trace[1]['state_before'] == agent.trace[1]['state_after']
     assert agent.trace[1]['pending_pool_before'] == agent.trace[1]['pending_pool_after'] == ['pdf']
-    assert set(harness.context_snapshot().direct_skill_ids) == {'pdf'}
+    assert harness.context_snapshot().direct_skill_ids == ()
 
 
 @pytest.mark.parametrize('queries,ids,expected', [

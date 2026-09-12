@@ -83,9 +83,7 @@ def validate_decision(
         raise ValueError("reason must be non-empty text")
     target = decision.target_bundle_id
     purpose = decision.purpose
-    if action == "DIRECT" and (target is not None or purpose is not None):
-        raise ValueError("DIRECT does not accept target_bundle_id or purpose")
-    if action == "EXTEND":
+    if action in {"DIRECT", "EXTEND"}:
         if not isinstance(target, str) or purpose is not None:
             raise ValueError("target_bundle_id must be a string")
         existing = next((bundle for bundle in memory.state.active_bundles
@@ -93,7 +91,7 @@ def validate_decision(
         if existing is None:
             raise ValueError("target_bundle_id is not active")
         if not set(ids) - set(existing.skill_ids):
-            raise ValueError("EXTEND requires at least one new skill")
+            raise ValueError(f"{action} requires at least one new skill")
     if action == "CREATE":
         if target is not None or not isinstance(purpose, str) or not purpose.strip():
             raise ValueError("CREATE requires non-empty purpose")
