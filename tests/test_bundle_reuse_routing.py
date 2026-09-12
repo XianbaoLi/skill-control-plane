@@ -5,9 +5,11 @@ from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.cards import RetrievalCard
 from skill_control_plane.discovery.discovery import SkillDiscovery
-from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
+from skill_control_plane.runtime import SkillControlPlane
 from skill_control_plane.runtime.capability_memory import ActiveBundle, RuntimeCapabilityState
-from skill_control_plane.integrations.reference_agent import AGENT_INSTRUCTIONS, ExperimentalSkillAgent
+from skill_control_plane.integrations.reference_agent import (
+    AGENT_INSTRUCTIONS, ExperimentalSkillAgent, dto_payload,
+)
 
 
 def card(skill_id, capabilities, use_when=()):
@@ -41,8 +43,8 @@ def harness(body_state='resident'):
                       ('powerpoint',))],
         skill_body_states={'powerpoint': body_state},
     )
-    return RuntimeCapabilityHarness(
-        discovery=SkillDiscovery(registry, retrieval_cards=cards), state=state)
+    return SkillControlPlane(
+        registry, discovery=SkillDiscovery(registry, retrieval_cards=cards), state=state)
 
 
 class Client:
@@ -62,8 +64,8 @@ def native(name, arguments):
 
 def test_compact_bundle_capabilities_are_structured_deduplicated_and_bounded():
     runtime = harness()
-    surface = runtime.render_bundle_context()
-    bundle = json.loads(surface)['maintained_bundles'][0]
+    surface = json.dumps(dto_payload(runtime.context_snapshot()))
+    bundle = dto_payload(runtime.context_snapshot())['maintained_bundles'][0]
     assert len(bundle['capabilities']) == 5
     assert bundle['capabilities'][:3] == [
         'create presentation slides',
@@ -75,12 +77,12 @@ def test_compact_bundle_capabilities_are_structured_deduplicated_and_bounded():
     assert 'presentation metadata' not in surface
     assert 'PRIVATE_POWERPOINT_BODY' not in surface
     assert 'cue' not in surface
-    assert len(surface) < len(runtime.discovery.records['powerpoint'].body)
+    assert len(surface) < len('PRIVATE_POWERPOINT_BODY' + ' body detail' * 500)
 
 
 def test_old_bundle_surface_is_available_only_for_controlled_ab():
     runtime = harness()
-    old = json.loads(runtime.render_bundle_context(compact=False))[
+    old = dto_payload(runtime.context_snapshot(compact=False))[
         'maintained_bundles'][0]
     assert len(old['capabilities']) == 8
     assert set(old['members'][0]) == {
@@ -97,13 +99,14 @@ def test_compact_capabilities_round_robin_members_and_remove_containment():
         'a': card('a', ('Create slides', 'slides', 'Render slides')),
         'b': card('b', ('Export PDF', 'CREATE SLIDES', 'Validate PDF')),
     }
-    runtime = RuntimeCapabilityHarness(
-        discovery=SkillDiscovery(SkillRegistry(records), retrieval_cards=cards),
+    store = SkillRegistry(records)
+    runtime = SkillControlPlane(
+        store, discovery=SkillDiscovery(store, retrieval_cards=cards),
         state=RuntimeCapabilityState([
             ActiveBundle('documents', 'Document work', ('b', 'a'))],
             skill_body_states={'a': 'resident', 'b': 'evicted'}),
     )
-    bundle = json.loads(runtime.render_bundle_context())['maintained_bundles'][0]
+    bundle = dto_payload(runtime.context_snapshot())['maintained_bundles'][0]
     assert bundle['capabilities'] == [
         'Create slides', 'Export PDF', 'Render slides', 'Validate PDF']
     assert [member['skill_id'] for member in bundle['members']] == ['a', 'b']
@@ -115,13 +118,14 @@ def test_compact_capabilities_use_one_prioritized_fallback_representation():
         SkillRecord('description', 'Description', '  fallback\n description  ', '', ''),
     ]
     cards = {'use': card('use', (), ('use-when fallback',))}
-    runtime = RuntimeCapabilityHarness(
-        discovery=SkillDiscovery(SkillRegistry(records), retrieval_cards=cards),
+    store = SkillRegistry(records)
+    runtime = SkillControlPlane(
+        store, discovery=SkillDiscovery(store, retrieval_cards=cards),
         state=RuntimeCapabilityState([
             ActiveBundle('fallbacks', 'Fallbacks', ('use', 'description'))],
             skill_body_states={'use': 'resident', 'description': 'resident'}),
     )
-    capabilities = json.loads(runtime.render_bundle_context())[
+    capabilities = dto_payload(runtime.context_snapshot())[
         'maintained_bundles'][0]['capabilities']
     assert capabilities == ['fallback description', 'use-when fallback']
     assert 'description should not appear' not in capabilities
@@ -163,8 +167,8 @@ def test_bundle_first_policy_includes_trigger_and_sufficiency_protocol():
 def test_resident_reuse_turn_audit_has_zero_tool_and_retrieval_calls():
     runtime = harness()
     agent = ExperimentalSkillAgent(
-        runtime.control_plane, Client([{'role': 'assistant', 'content': 'Reused.'}]))
-    before = runtime.retrieval_call_count
+        runtime, Client([{'role': 'assistant', 'content': 'Reused.'}]))
+    before = runtime.turn_audit().retrieval_call_count
     assert agent.run('继续修改这个 presentation') == 'Reused.'
     audit = agent.turn_audit
     assert audit['bundle_state_before'][0]['capabilities']
@@ -181,7 +185,7 @@ def test_resident_reuse_turn_audit_has_zero_tool_and_retrieval_calls():
 
 def test_evicted_reload_turn_audit_has_exact_load_only():
     runtime = harness('evicted')
-    agent = ExperimentalSkillAgent(runtime.control_plane, Client([
+    agent = ExperimentalSkillAgent(runtime, Client([
         native('load_skill_body', {'skill_id': 'powerpoint'}),
         {'role': 'assistant', 'content': 'Reloaded.'},
     ]))
@@ -199,15 +203,15 @@ def test_evicted_reload_turn_audit_has_exact_load_only():
 def test_evicted_metadata_reuse_is_not_mislabeled_resident_reuse():
     runtime = harness('evicted')
     agent = ExperimentalSkillAgent(
-        runtime.control_plane, Client([{'role': 'assistant', 'content': 'Skipped.'}]))
+        runtime, Client([{'role': 'assistant', 'content': 'Skipped.'}]))
     agent.run('继续改刚才 PPT 的第三页')
     assert agent.turn_audit['bundle_reuse_outcome'] == 'bundle_metadata_reuse'
 
 
 def test_gap_trace_records_discovery_without_host_side_shortcut():
     runtime = harness()
-    state_before = deepcopy(runtime.state)
-    agent = ExperimentalSkillAgent(runtime.control_plane, Client([
+    state_before = deepcopy(runtime.context_snapshot())
+    agent = ExperimentalSkillAgent(runtime, Client([
         native('load_capability', {'need': 'export spreadsheet data to Excel'}),
         {'role': 'assistant', 'content': 'Candidates inspected.'},
     ]))
@@ -218,4 +222,6 @@ def test_gap_trace_records_discovery_without_host_side_shortcut():
     assert audit['retrieval_call_count_after'] == audit['retrieval_call_count_before'] + 1
     assert audit['bundle_reuse_outcome'] == 'discovery'
     assert audit['tool_calls'][0]['arguments']['need'] == 'export spreadsheet data to Excel'
-    assert runtime.state == state_before  # Search/trace add no routing state.
+    after = runtime.context_snapshot()
+    assert after.direct_skill_ids == state_before.direct_skill_ids
+    assert after.maintained_bundles == state_before.maintained_bundles

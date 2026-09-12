@@ -188,10 +188,12 @@ def test_harness_stable_compact_context_without_library(discovery, monkeypatch):
     def unexpected_search(*args, **kwargs):
         pytest.fail('rendering must not perform retrieval')
     monkeypatch.setattr(discovery, 'discover_skills', unexpected_search)
-    harness = RuntimeCapabilityHarness(loader, RuntimeCapabilityState(bundles, {'pdf', 'slides'}))
-    reordered = RuntimeCapabilityHarness(loader, RuntimeCapabilityState([
-        bundles[1], ActiveBundle('z', 'Mail operations', ('pdf', 'email')),
-    ], {'slides', 'pdf'}))
+    with pytest.warns(DeprecationWarning, match='deprecated'):
+        harness = RuntimeCapabilityHarness(
+            loader, RuntimeCapabilityState(bundles, {'pdf', 'slides'}))
+        reordered = RuntimeCapabilityHarness(loader, RuntimeCapabilityState([
+            bundles[1], ActiveBundle('z', 'Mail operations', ('pdf', 'email')),
+        ], {'slides', 'pdf'}))
     assert harness.render_context() == reordered.render_context()
     data = context_data(harness)
     assert data['direct_skills'] == ['pdf', 'slides']
@@ -220,7 +222,9 @@ def test_harness_turn_to_turn_direct_create_extend(discovery):
             return json.dumps({'action': 'CREATE', 'skill_ids': ['github'], 'reason': 'ongoing', 'purpose': 'Review code'})
         return json.dumps({'action': 'EXTEND', 'skill_ids': ['github-actions'],
                            'reason': 'check CI', 'target_bundle_id': prompts[-1]['maintained_bundles'][0]['bundle_id']})
-    harness = RuntimeCapabilityHarness(RuntimeCapabilityLoader(discovery, LLMCapabilityResolver(complete)))
+    with pytest.warns(DeprecationWarning, match='deprecated'):
+        harness = RuntimeCapabilityHarness(
+            RuntimeCapabilityLoader(discovery, LLMCapabilityResolver(complete)))
     assert context_data(harness)['direct_skills'] == []
     assert context_data(harness)['maintained_bundles'] == []
     harness.load_capability('extract PDF text and presentation slides')
@@ -271,7 +275,10 @@ def test_harness_failure_preserves_state_and_context(discovery, failure):
             raise RuntimeError('provider unavailable')
         return '{}'
     initial = RuntimeCapabilityState([ActiveBundle('mail', 'Manage mail', ('email',))], {'slides'})
-    harness = RuntimeCapabilityHarness(RuntimeCapabilityLoader(discovery, LLMCapabilityResolver(complete)), initial)
+    with pytest.warns(DeprecationWarning, match='deprecated'):
+        harness = RuntimeCapabilityHarness(
+            RuntimeCapabilityLoader(discovery, LLMCapabilityResolver(complete)),
+            initial)
     before = harness.render_context()
     need = {'empty': 'zzzznonexistent', 'blank': ' '}.get(failure, 'PDF')
     with pytest.raises((ValueError, RuntimeError)):

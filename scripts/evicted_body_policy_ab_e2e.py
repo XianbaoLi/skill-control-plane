@@ -14,7 +14,7 @@ from skill_control_plane.corpus.bigmodel_chat import BigModelChatClient
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.cards import load_retrieval_cards
 from skill_control_plane.discovery.discovery import SkillDiscovery
-from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
+from skill_control_plane.runtime import SkillControlPlane
 from skill_control_plane.runtime.capability_memory import ActiveBundle, RuntimeCapabilityState
 from skill_control_plane.integrations.reference_agent import ExperimentalSkillAgent
 
@@ -76,10 +76,10 @@ class RecordingClient:
 
 
 def make_agent(discovery, client, *, policy):
-    harness = RuntimeCapabilityHarness(
-        discovery=discovery, state=deepcopy(frozen_state()))
+    control_plane = SkillControlPlane(
+        discovery.registry, discovery=discovery, state=deepcopy(frozen_state()))
     agent = ExperimentalSkillAgent(
-        harness.control_plane,
+        control_plane,
         client,
         max_steps=8,
         require_evicted_body_reload=(policy == 'old_mandatory'),

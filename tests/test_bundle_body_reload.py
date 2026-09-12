@@ -7,8 +7,10 @@ import pytest
 from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.discovery import SkillDiscovery
-from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
-from skill_control_plane.integrations.reference_agent import CAPABILITY_TOOLS, ExperimentalSkillAgent
+from skill_control_plane.runtime import SkillControlPlane
+from skill_control_plane.integrations.reference_agent import (
+    CAPABILITY_TOOLS, ExperimentalSkillAgent, dto_payload, parse_tool_arguments,
+)
 
 
 def tool(name, arguments):
@@ -38,27 +40,29 @@ def harness():
         SkillRecord('pdf', 'PDF', 'read PDF documents',
                     'FULL_PDF_SKILL_BODY', '/skills/pdf/SKILL.md'),
     ])
-    return RuntimeCapabilityHarness(discovery=SkillDiscovery(registry))
+    return SkillControlPlane(registry, discovery=SkillDiscovery(registry))
 
 
 def create_powerpoint(harness):
     harness.search_capability('create and edit presentation slides')
-    return harness.apply_capability(json.dumps({
+    return harness.apply_capability(parse_tool_arguments('apply_capability', json.dumps({
         'action': 'CREATE', 'skill_ids': ['powerpoint'],
         'reason': 'maintain the presentation workflow',
         'purpose': 'Create and revise the document presentation',
         'coverage': [{'need': 'presentation work',
                       'covered_by': 'skill:powerpoint'}],
         'remaining_gaps': [],
-    }))
+    })))
 
 
 def test_apply_create_injects_once_and_marks_bundle_body_resident(harness):
     result = create_powerpoint(harness)
-    assert result['skill_bodies'] == [
-        {'skill_id': 'powerpoint', 'body': 'FULL_POWERPOINT_SKILL_BODY'}]
-    assert harness.state.active_bundles[0].skill_ids == ('powerpoint',)
-    assert harness.state.skill_body_states == {'powerpoint': 'resident'}
+    assert [(body.skill_id, body.body) for body in result.skill_bodies] == [
+        ('powerpoint', 'FULL_POWERPOINT_SKILL_BODY')]
+    snapshot = harness.context_snapshot()
+    assert tuple(member.skill_id for member in snapshot.maintained_bundles[0].members) \
+        == ('powerpoint',)
+    assert snapshot.skill_body_states == {'powerpoint': 'resident'}
 
 
 def test_evicted_exact_reload_uses_store_without_retrieval(harness, monkeypatch):
@@ -70,72 +74,73 @@ def test_evicted_exact_reload_uses_store_without_retrieval(harness, monkeypatch)
         calls['retrieval'] += 1
         pytest.fail('exact body reload must not run retrieval')
 
-    exact_load = harness.discovery.registry.load_skill_body
+    exact_load = SkillRegistry.load_skill_body
 
-    def count_body(skill_id):
+    def count_body(store, skill_id):
         calls['body'] += 1
-        return exact_load(skill_id)
+        return exact_load(store, skill_id)
 
-    monkeypatch.setattr(harness.discovery, 'discover_skills', no_retrieval)
-    monkeypatch.setattr(harness.discovery.registry, 'load_skill_body', count_body)
+    monkeypatch.setattr(SkillDiscovery, 'discover_skills', no_retrieval)
+    monkeypatch.setattr(SkillRegistry, 'load_skill_body', count_body)
     result = harness.load_skill_body('powerpoint')
-    assert result == {
-        'status': 'loaded', 'skill_id': 'powerpoint',
-        'bundle_ids': [harness.state.active_bundles[0].bundle_id],
-        'body': 'FULL_POWERPOINT_SKILL_BODY',
-    }
+    assert result.status == 'loaded'
+    assert result.skill_id == 'powerpoint'
+    assert result.bundle_ids == (harness.context_snapshot().maintained_bundles[0].bundle_id,)
+    assert result.body == 'FULL_POWERPOINT_SKILL_BODY'
     assert calls == {'retrieval': 0, 'body': 1}
-    assert harness.state.skill_body_states['powerpoint'] == 'resident'
+    assert harness.context_snapshot().skill_body_states['powerpoint'] == 'resident'
 
 
 def test_resident_reload_is_idempotent_and_does_not_read_store(harness, monkeypatch):
     create_powerpoint(harness)
-    monkeypatch.setattr(harness.discovery.registry, 'load_skill_body',
-                        lambda skill_id: pytest.fail('must not inject again'))
+    monkeypatch.setattr(SkillRegistry, 'load_skill_body',
+                        lambda store, skill_id: pytest.fail('must not inject again'))
     result = harness.load_skill_body('powerpoint')
-    assert result['status'] == 'already_resident'
-    assert 'body' not in result
-    assert harness.state.skill_body_states == {'powerpoint': 'resident'}
+    assert result.status == 'already_resident'
+    assert result.body is None
+    assert harness.context_snapshot().skill_body_states == {'powerpoint': 'resident'}
 
 
 @pytest.mark.parametrize('skill_id', ['pdf', 'unknown'])
 def test_non_bundle_reload_rejected_without_retrieval_or_state_change(
         harness, monkeypatch, skill_id):
     create_powerpoint(harness)
-    before = deepcopy(harness.state)
-    monkeypatch.setattr(harness.discovery, 'discover_skills',
+    before = deepcopy(harness.context_snapshot())
+    monkeypatch.setattr(SkillDiscovery, 'discover_skills',
                         lambda *args, **kwargs: pytest.fail('must not retrieve'))
-    monkeypatch.setattr(harness.discovery.registry, 'load_skill_body',
-                        lambda exact_id: pytest.fail('must not read store'))
+    monkeypatch.setattr(SkillRegistry, 'load_skill_body',
+                        lambda store, exact_id: pytest.fail('must not read store'))
     with pytest.raises(ValueError, match='Bundle member'):
         harness.load_skill_body(skill_id)
-    assert harness.state == before
+    assert harness.context_snapshot() == before
 
 
 def test_eviction_and_reload_change_only_residency(harness):
     create_powerpoint(harness)
-    bundles = deepcopy(harness.state.active_bundles)
-    direct = set(harness.state.direct_skills)
+    before = deepcopy(harness.context_snapshot())
     harness.mark_all_skill_bodies_evicted()
-    assert harness.state.active_bundles == bundles
-    assert harness.state.direct_skills == direct
-    assert harness.state.skill_body_states == {'powerpoint': 'evicted'}
+    evicted = harness.context_snapshot()
+    assert tuple((bundle.bundle_id, bundle.purpose) for bundle in evicted.maintained_bundles) \
+        == tuple((bundle.bundle_id, bundle.purpose) for bundle in before.maintained_bundles)
+    assert evicted.direct_skill_ids == before.direct_skill_ids
+    assert evicted.skill_body_states == {'powerpoint': 'evicted'}
     harness.load_skill_body('powerpoint')
-    assert harness.state.active_bundles == bundles
-    assert harness.state.direct_skills == direct
-    assert len(harness.state.active_bundles) == 1
-    assert harness.state.active_bundles[0].skill_ids == ('powerpoint',)
+    after = harness.context_snapshot()
+    assert after.direct_skill_ids == before.direct_skill_ids
+    assert len(after.maintained_bundles) == 1
+    assert tuple(member.skill_id for member in after.maintained_bundles[0].members) \
+        == ('powerpoint',)
 
 
 def test_bundle_surface_is_compact_and_reports_body_state(harness):
     create_powerpoint(harness)
-    resident = harness.render_bundle_context()
+    resident = json.dumps(dto_payload(harness.context_snapshot()))
     assert 'FULL_POWERPOINT_SKILL_BODY' not in resident
     member = json.loads(resident)['maintained_bundles'][0]['members'][0]
     assert member['skill_id'] == 'powerpoint'
     assert member['body_state'] == 'resident'
     harness.mark_all_skill_bodies_evicted()
-    member = json.loads(harness.render_bundle_context())['maintained_bundles'][0]['members'][0]
+    member = dto_payload(harness.context_snapshot())['maintained_bundles'][0]['members'][0]
     assert member['body_state'] == 'evicted'
 
 
@@ -174,33 +179,33 @@ def test_same_agent_second_turn_exact_reload_has_zero_retrieval(harness, monkeyp
         finish_after_reload,
     ])
     retrieval_count = body_count = 0
-    discover = harness.discovery.discover_skills
-    exact_load = harness.discovery.registry.load_skill_body
+    discover = SkillDiscovery.discover_skills
+    exact_load = SkillRegistry.load_skill_body
 
-    def count_retrieval(*args, **kwargs):
+    def count_retrieval(discovery, *args, **kwargs):
         nonlocal retrieval_count
         retrieval_count += 1
-        return discover(*args, **kwargs)
+        return discover(discovery, *args, **kwargs)
 
-    def count_body(skill_id):
+    def count_body(store, skill_id):
         nonlocal body_count
         body_count += 1
-        return exact_load(skill_id)
+        return exact_load(store, skill_id)
 
-    monkeypatch.setattr(harness.discovery, 'discover_skills', count_retrieval)
-    monkeypatch.setattr(harness.discovery.registry, 'load_skill_body', count_body)
-    agent = ExperimentalSkillAgent(harness.control_plane, client)
+    monkeypatch.setattr(SkillDiscovery, 'discover_skills', count_retrieval)
+    monkeypatch.setattr(SkillRegistry, 'load_skill_body', count_body)
+    agent = ExperimentalSkillAgent(harness, client)
     assert agent.run('读取这个文档并做成 PPT') == 'PPT created.'
-    bundle_before = deepcopy(harness.state.active_bundles)
-    assert harness.state.skill_body_states == {'powerpoint': 'resident'}
+    bundle_before = deepcopy(harness.context_snapshot().maintained_bundles)
+    assert harness.context_snapshot().skill_body_states == {'powerpoint': 'resident'}
     harness.mark_all_skill_bodies_evicted()
-    assert harness.state.skill_body_states == {'powerpoint': 'evicted'}
+    assert harness.context_snapshot().skill_body_states == {'powerpoint': 'evicted'}
     assert agent.run('继续修改刚才 PPT 的第三页') == 'Third slide revised.'
 
     assert retrieval_count == 1  # Turn 1 only; Turn 2 is zero retrieval.
     assert body_count == 1
-    assert harness.state.skill_body_states == {'powerpoint': 'resident'}
-    assert harness.state.active_bundles == bundle_before
+    assert harness.context_snapshot().skill_body_states == {'powerpoint': 'resident'}
+    assert harness.context_snapshot().maintained_bundles == bundle_before
     assert [event['tool'] for row in agent.trace
             for event in row['tool_executions']] == ['load_skill_body']
     assert agent.trace[0]['canonical_body_ids'] == ['powerpoint']

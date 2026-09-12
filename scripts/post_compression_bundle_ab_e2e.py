@@ -15,7 +15,7 @@ from skill_control_plane.corpus.bigmodel_chat import BigModelChatClient
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.cards import load_retrieval_cards
 from skill_control_plane.discovery.discovery import SkillDiscovery
-from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
+from skill_control_plane.runtime import SkillControlPlane
 from skill_control_plane.runtime.capability_memory import ActiveBundle, RuntimeCapabilityState
 from skill_control_plane.integrations.reference_agent import ExperimentalSkillAgent
 
@@ -76,12 +76,12 @@ class HiddenBundleAgent(ExperimentalSkillAgent):
 
 
 def make_agent(discovery, client, *, visible):
-    harness = RuntimeCapabilityHarness(
-        discovery=discovery,
+    control_plane = SkillControlPlane(
+        discovery.registry, discovery=discovery,
         state=deepcopy(frozen_runtime_state()),
     )
     agent_type = ExperimentalSkillAgent if visible else HiddenBundleAgent
-    agent = agent_type(harness.control_plane, client, max_steps=8)
+    agent = agent_type(control_plane, client, max_steps=8)
     agent.history = deepcopy(list(COMPRESSED_HISTORY))
     return agent
 

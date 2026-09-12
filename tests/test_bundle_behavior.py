@@ -98,7 +98,10 @@ def test_four_turns_preserve_history_extend_related_and_separate_unrelated(disco
     extended_document = report['turns'][2]['state_after']['active_bundles'][0]
     assert extended_document['bundle_id'] == initial_document['bundle_id']
     assert set(extended_document['skill_ids']) == set(initial_document['skill_ids']) | {'xlsx'}
-    assert report['turns'][3]['state_after']['active_bundles'][0] == extended_document
+    final_document = next(bundle for bundle in
+        report['turns'][3]['state_after']['active_bundles']
+        if bundle['bundle_id'] == extended_document['bundle_id'])
+    assert final_document == extended_document
     for previous, current in zip(report['turns'], report['turns'][1:]):
         assert current['state_before'] == previous['state_after']
         assert current['history_start'] == previous['history_end']

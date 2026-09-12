@@ -14,7 +14,7 @@ from skill_control_plane.corpus.bigmodel_chat import BigModelChatClient
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.cards import load_retrieval_cards
 from skill_control_plane.discovery.discovery import SkillDiscovery
-from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
+from skill_control_plane.runtime import SkillControlPlane
 from skill_control_plane.runtime.capability_memory import ActiveBundle, RuntimeCapabilityState
 from skill_control_plane.integrations.reference_agent import ExperimentalSkillAgent
 
@@ -126,7 +126,7 @@ class RecordingClient:
         return response
 
 
-class CaseHarness(RuntimeCapabilityHarness):
+class CaseControlPlane(SkillControlPlane):
     """Experiment-only candidate window; retrieval order remains unchanged."""
 
     def __init__(self, *args, candidate_window=10, **kwargs):
@@ -197,10 +197,10 @@ def evaluate(case, agent, answer):
 
 def run_case(case, discovery, glm):
     recorder = RecordingClient(glm)
-    harness = CaseHarness(
-        discovery=discovery, state=deepcopy(state_for(case)),
+    control_plane = CaseControlPlane(
+        discovery.registry, discovery=discovery, state=deepcopy(state_for(case)),
         candidate_window=case.get('candidate_window', 10))
-    agent = ExperimentalSkillAgent(harness.control_plane, recorder, max_steps=10)
+    agent = ExperimentalSkillAgent(control_plane, recorder, max_steps=10)
     agent.history = seeded_history(case, discovery)
     started = monotonic()
     answer = agent.run(case['task'])
@@ -209,7 +209,7 @@ def run_case(case, discovery, glm):
     result = {
         'case_id': case['case_id'], 'task': case['task'],
         'corpus': case['corpus'], 'corpus_size': len(discovery.records),
-        'candidate_window': harness.candidate_window,
+        'candidate_window': control_plane.candidate_window,
         'bundle_before': agent.turn_audit['bundle_state_before'],
         'tool_call_trace': [
             {'tool': event['tool'], 'arguments': event['arguments'],

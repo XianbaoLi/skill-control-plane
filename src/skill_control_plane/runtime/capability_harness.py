@@ -14,7 +14,6 @@ from typing import Mapping
 from skill_control_plane.discovery import SkillDiscovery, SkillDiscoveryResult
 
 from .capability_memory import CapabilityMemory, RuntimeCapabilityState, validate_state
-from .control_plane import SkillControlPlane
 from .discovery_session import CapabilityDecision, CoverageClaim, DiscoverySession
 
 
@@ -57,12 +56,6 @@ class RuntimeCapabilityHarness:
         )
         self.discovery_session = DiscoverySession(
             self.discovery, self.memory, max_searches=max_searches_per_turn)
-        self.control_plane = SkillControlPlane(
-            store,
-            discovery=self.discovery,
-            memory=self.memory,
-            discovery_session=self.discovery_session,
-        )
 
     @property
     def state(self):

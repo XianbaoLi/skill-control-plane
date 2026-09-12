@@ -15,7 +15,7 @@ from skill_control_plane.corpus.bigmodel_chat import BigModelChatClient
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.cards import load_retrieval_cards
 from skill_control_plane.discovery.discovery import SkillDiscovery
-from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
+from skill_control_plane.runtime import SkillControlPlane
 from skill_control_plane.runtime.capability_memory import ActiveBundle, RuntimeCapabilityState
 from skill_control_plane.integrations.reference_agent import ExperimentalSkillAgent, dto_payload
 
@@ -109,11 +109,11 @@ class RecordingClient:
 
 
 def make_agent(discovery, client, *, category, surface):
-    harness = RuntimeCapabilityHarness(
-        discovery=discovery, state=deepcopy(behavior_state(category)))
+    control_plane = SkillControlPlane(
+        discovery.registry, discovery=discovery,
+        state=deepcopy(behavior_state(category)))
     agent_type = OldBundleCardAgent if surface == 'old' else ExperimentalSkillAgent
-    agent = agent_type(harness.control_plane, client, max_steps=8)
-    agent._experiment_harness = harness
+    agent = agent_type(control_plane, client, max_steps=8)
     agent.history = canonical_history(discovery.records['powerpoint'].body)
     return agent
 
@@ -237,11 +237,13 @@ def scaling_report(discovery):
         bundles = list(SCALING_BUNDLES[:count])
         states = {skill_id: 'evicted' for bundle in bundles
                   for skill_id in bundle.skill_ids}
-        harness = RuntimeCapabilityHarness(
-            discovery=discovery,
+        control_plane = SkillControlPlane(
+            discovery.registry, discovery=discovery,
             state=RuntimeCapabilityState(bundles, skill_body_states=states))
-        old = harness.render_bundle_context(compact=False)
-        compact = harness.render_bundle_context()
+        old = json.dumps({'maintained_bundles': dto_payload(
+            control_plane.context_snapshot(compact=False))['maintained_bundles']})
+        compact = json.dumps({'maintained_bundles': dto_payload(
+            control_plane.context_snapshot())['maintained_bundles']})
         old_metrics = surface_metrics(old)
         compact_metrics = surface_metrics(compact)
         rows.append({

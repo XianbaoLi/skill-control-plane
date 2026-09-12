@@ -14,7 +14,7 @@ from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.bigmodel import BigModelDenseRetriever, BigModelEmbeddingClient
 from skill_control_plane.discovery.cards import load_retrieval_cards
 from skill_control_plane.discovery.discovery import SkillDiscovery
-from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
+from skill_control_plane.runtime import SkillControlPlane
 from skill_control_plane.integrations.reference_agent import ExperimentalSkillAgent
 
 ROOT = Path('local_artifacts/v0.5/hermes-current87')
@@ -201,9 +201,9 @@ def main():
             registry, dense_factory=lambda records: BigModelDenseRetriever(
                 records, model_name=embedding.model, dimensions=embedding.dimensions,
                 embed_batch=embedding), retrieval_cards=cards)
-        harness = RuntimeCapabilityHarness(discovery=discovery)
+        control_plane = SkillControlPlane(registry, discovery=discovery)
         agent = ExperimentalSkillAgent(
-            harness.control_plane, RecordingClient(chat), max_steps=args.max_steps)
+            control_plane, RecordingClient(chat), max_steps=args.max_steps)
         report['final'] = agent.run(args.task)
         # Acceptance measures observed actions; it does not prescribe model decisions.
         search_steps = [r for r in agent.trace if any(

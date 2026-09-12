@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from dataclasses import asdict
 from collections.abc import Callable
 
 from skill_control_plane.discovery.discovery import SkillDiscovery
-from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
+from skill_control_plane.runtime import SkillControlPlane
 from skill_control_plane.integrations.reference_agent import ConversationClient, ExperimentalSkillAgent
 
 TASKS = (
@@ -27,10 +26,17 @@ TASKS = (
 DOCUMENT_SKILLS = {'pdf', 'ocr-and-documents', 'powerpoint'}
 
 
-def state_snapshot(harness: RuntimeCapabilityHarness) -> dict:
-    state = asdict(harness.state)
-    state['direct_skills'] = sorted(state['direct_skills'])
-    return state
+def state_snapshot(control_plane: SkillControlPlane) -> dict:
+    snapshot = control_plane.context_snapshot()
+    return {
+        'active_bundles': [{
+            'bundle_id': bundle.bundle_id,
+            'purpose': bundle.purpose,
+            'skill_ids': [member.skill_id for member in bundle.members],
+        } for bundle in snapshot.maintained_bundles],
+        'direct_skills': list(snapshot.direct_skill_ids),
+        'skill_body_states': snapshot.skill_body_states,
+    }
 
 
 def evaluate_turns(turns: list[dict]) -> list[dict]:
@@ -112,13 +118,13 @@ def run_experiment(discovery: SkillDiscovery, client: ConversationClient, *,
             save()
             return response
 
-    harness = RuntimeCapabilityHarness(discovery=discovery)
-    agent = ExperimentalSkillAgent(
-        harness.control_plane, RecordingClient(), max_steps=max_steps)
+    control_plane = SkillControlPlane(discovery.registry, discovery=discovery)
+    agent = ExperimentalSkillAgent(control_plane, RecordingClient(), max_steps=max_steps)
     for number, task in enumerate(TASKS, 1):
         history_start = len(agent.history)
         call_start = len(report['model_calls'])
-        active_turn = {'turn': number, 'user_task': task, 'state_before': state_snapshot(harness),
+        active_turn = {'turn': number, 'user_task': task,
+                       'state_before': state_snapshot(control_plane),
                        'history_start': history_start, 'status': 'running'}
         report['turns'].append(active_turn)
         try:
@@ -132,7 +138,7 @@ def run_experiment(discovery: SkillDiscovery, client: ConversationClient, *,
             active_turn.update(status='error', error_type=type(exc).__name__)
             report['status'] = 'error'
         finally:
-            active_turn['state_after'] = state_snapshot(harness)
+            active_turn['state_after'] = state_snapshot(control_plane)
             active_turn['history_end'] = len(agent.history)
             active_turn['model_actions'] = [
                 {'tool': event['tool'], **deepcopy(event['arguments'])}

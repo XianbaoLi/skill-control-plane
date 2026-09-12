@@ -12,7 +12,7 @@ from skill_control_plane.corpus.bigmodel_chat import BigModelChatClient
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.cards import load_retrieval_cards
 from skill_control_plane.discovery.discovery import SkillDiscovery
-from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
+from skill_control_plane.runtime import ActiveBundle, RuntimeCapabilityState, SkillControlPlane
 from skill_control_plane.integrations.reference_agent import (
     AGENT_INSTRUCTIONS, ExperimentalSkillAgent,
 )
@@ -70,13 +70,23 @@ class HiddenBundleAgent(ExperimentalSkillAgent):
 
 
 def clone_agent(source, client, *, hidden=False):
-    harness = RuntimeCapabilityHarness(
-        discovery=source._experiment_harness.discovery,
-        state=deepcopy(source._experiment_harness.state),
+    snapshot = source.control_plane.context_snapshot()
+    state = RuntimeCapabilityState(
+        active_bundles=[ActiveBundle(
+            bundle.bundle_id, bundle.purpose,
+            tuple(member.skill_id for member in bundle.members),
+        ) for bundle in snapshot.maintained_bundles],
+        direct_skills=set(snapshot.direct_skill_ids),
+        skill_body_states=snapshot.skill_body_states,
+    )
+    control_plane = SkillControlPlane(
+        source._experiment_discovery.registry,
+        discovery=source._experiment_discovery,
+        state=state,
     )
     agent_type = HiddenBundleAgent if hidden else ExperimentalSkillAgent
-    agent = agent_type(harness.control_plane, client, max_steps=8)
-    agent._experiment_harness = harness
+    agent = agent_type(control_plane, client, max_steps=8)
+    agent._experiment_discovery = source._experiment_discovery
     agent.history = deepcopy(source.history)
     agent._history_skill_ids = set(source._history_skill_ids)
     return agent
@@ -153,17 +163,17 @@ def main():
         discovery = SkillDiscovery(registry, retrieval_cards=cards)
         glm = BigModelChatClient(timeout=60, max_tokens=4096)
         client = RecordingClient(glm)
-        bootstrap_harness = RuntimeCapabilityHarness(discovery=discovery)
+        bootstrap_control_plane = SkillControlPlane(
+            registry, discovery=discovery)
         bootstrap = ExperimentalSkillAgent(
-            bootstrap_harness.control_plane, client, max_steps=8)
-        bootstrap._experiment_harness = bootstrap_harness
+            bootstrap_control_plane, client, max_steps=8)
+        bootstrap._experiment_discovery = discovery
         report['model'] = glm.model
         report['bootstrap'] = run_turn(
             bootstrap, client, 'bootstrap', BOOTSTRAP)
-        powerpoint_bundles = [
-            bundle for bundle in bootstrap_harness.state.active_bundles
-            if bundle.skill_ids == ('powerpoint',)
-        ]
+        powerpoint_bundles = [bundle for bundle in
+            bootstrap_control_plane.context_snapshot().maintained_bundles
+            if tuple(member.skill_id for member in bundle.members) == ('powerpoint',)]
         if not powerpoint_bundles:
             raise RuntimeError('bootstrap did not CREATE a powerpoint-only Bundle')
         report['bootstrap_bundle_id'] = powerpoint_bundles[0].bundle_id

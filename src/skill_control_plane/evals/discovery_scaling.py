@@ -20,7 +20,7 @@ from skill_control_plane.evals.control_plane import (
 )
 from skill_control_plane.models import SkillRecord
 from skill_control_plane.discovery.discovery import SkillDiscovery
-from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
+from skill_control_plane.runtime import CapabilityMemory, DiscoverySession
 
 
 SIZES = (20, 40, 60, 87, 150, 300, 500, 1000)
@@ -354,7 +354,8 @@ def run_arm(*, arm: str, case: DiscoveryCase, ids: tuple[str, ...], records: dic
         "as a separate load_capability call, before selecting.\n")
     tools = [SELECT_TOOL] if arm == "full_catalog" else [LOAD_TOOL, SELECT_TOOL]
     history = [{"role": "user", "content": case.query}]
-    harness = RuntimeCapabilityHarness(discovery=discovery) if discovery is not None else None
+    session = (DiscoverySession(discovery, CapabilityMemory(discovery.registry))
+               if discovery is not None else None)
     searches: list[dict] = []
     calls: list[dict] = []
     selected: list[str] = []
@@ -384,13 +385,16 @@ def run_arm(*, arm: str, case: DiscoveryCase, ids: tuple[str, ...], records: dic
                     if arguments["need"] not in allowed_queries:
                         raise ValueError("load_capability need must be one frozen user paragraph verbatim")
                     retrieval_started = perf_counter()
-                    internal = harness.search_capability(arguments["need"])  # type: ignore[union-attr]
+                    internal = session.search(arguments["need"])  # type: ignore[union-attr]
                     retrieval_seconds += perf_counter() - retrieval_started
-                    result = harness.model_visible_candidates(internal)  # type: ignore[union-attr]
+                    result = {
+                        **discovery.model_visible_payload(internal),  # type: ignore[union-attr]
+                        "search_control": asdict(session.last_search_control),  # type: ignore[union-attr]
+                    }
                     searches.append({"need": arguments["need"],
                                      "model_visible_payload": result,
                                      "internal_retrieval_record": asdict(internal),
-                                     "pool_after": [c.skill_id for c in harness.pending_candidates.candidates]})  # type: ignore[union-attr]
+                                     "pool_after": [c.skill_id for c in session.pending_candidates.candidates]})  # type: ignore[union-attr]
                     history.append({"role": "tool", "tool_call_id": call_id,
                                     "content": json.dumps(result, ensure_ascii=False)})
                 elif name == "select_skills":
@@ -400,10 +404,10 @@ def run_arm(*, arm: str, case: DiscoveryCase, ids: tuple[str, ...], records: dic
                     if arm == "full_catalog" and not set(proposed) <= set(ids):
                         raise ValueError("selection outside catalog")
                     if arm == "retrieval_first":
-                        pending = harness.pending_candidates  # type: ignore[union-attr]
+                        pending = session.pending_candidates  # type: ignore[union-attr]
                         if pending is None or not set(proposed) <= {c.skill_id for c in pending.candidates}:
                             raise ValueError("selection outside candidate pool")
-                        harness.pending_candidates = None  # type: ignore[union-attr]
+                        session.pending_candidates = None  # type: ignore[union-attr]
                     selected = proposed
                     elapsed = perf_counter() - started
                     return _result(arm, case, ids, selected, searches, calls, elapsed,

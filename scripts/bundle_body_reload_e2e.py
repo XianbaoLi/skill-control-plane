@@ -12,7 +12,7 @@ from skill_control_plane.corpus.bigmodel_chat import BigModelChatClient
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.cards import load_retrieval_cards
 from skill_control_plane.discovery.discovery import SkillDiscovery
-from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
+from skill_control_plane.runtime import SkillControlPlane
 from skill_control_plane.integrations.reference_agent import ExperimentalSkillAgent
 
 
@@ -27,16 +27,18 @@ TURN_1 = (
 TURN_2 = '继续修改刚才 PPT 的第三页；沿用已有 Bundle，按当前 body_state 选择正确的 native tool。'
 
 
-def snapshot(harness):
+def snapshot(control_plane):
+    context = control_plane.context_snapshot()
+    audit = control_plane.turn_audit()
     return {
         'bundles': [
             {'bundle_id': bundle.bundle_id, 'purpose': bundle.purpose,
-             'skill_ids': list(bundle.skill_ids)}
-            for bundle in harness.state.active_bundles
+             'skill_ids': [member.skill_id for member in bundle.members]}
+            for bundle in context.maintained_bundles
         ],
-        'body_residency': dict(harness.state.skill_body_states),
-        'retrieval_call_count': harness.retrieval_call_count,
-        'body_load_count': harness.body_load_count,
+        'body_residency': context.skill_body_states,
+        'retrieval_call_count': audit.retrieval_call_count,
+        'body_load_count': audit.body_load_count,
     }
 
 
@@ -57,8 +59,8 @@ def main():
         _validate_root_snapshot(str(ROOT), str(MANIFEST))
         cards = load_retrieval_cards(CARDS)
         registry = SkillRegistry.from_tree(ROOT)
-        harness = RuntimeCapabilityHarness(
-            discovery=SkillDiscovery(registry, retrieval_cards=cards))
+        discovery = SkillDiscovery(registry, retrieval_cards=cards)
+        control_plane = SkillControlPlane(registry, discovery=discovery)
         chat = BigModelChatClient(timeout=60, max_tokens=4096)
         powerpoint_body = registry.load_skill_body('powerpoint')
         wire_audit = []
@@ -91,33 +93,32 @@ def main():
                 return chat.complete_messages(messages, tools=tools)
 
         client = WireAuditClient()
-        agent = ExperimentalSkillAgent(harness.control_plane, client, max_steps=8)
+        agent = ExperimentalSkillAgent(control_plane, client, max_steps=8)
 
-        before = snapshot(harness)
+        before = snapshot(control_plane)
         answer = agent.run(TURN_1)
-        after = snapshot(harness)
+        after = snapshot(control_plane)
         report['turns'].append({
             'task': TURN_1, 'answer': answer, 'before': before, 'after': after,
             'tool_trace': deepcopy(agent.trace),
         })
-        powerpoint_bundles = [
-            bundle for bundle in harness.state.active_bundles
-            if 'powerpoint' in bundle.skill_ids
-        ]
+        powerpoint_bundles = [bundle for bundle in
+            control_plane.context_snapshot().maintained_bundles
+            if 'powerpoint' in {member.skill_id for member in bundle.members}]
         if not powerpoint_bundles:
             raise RuntimeError('Turn 1 did not CREATE a Bundle containing powerpoint')
-        if harness.state.skill_body_states['powerpoint'] != 'resident':
+        if control_plane.context_snapshot().skill_body_states['powerpoint'] != 'resident':
             raise RuntimeError('powerpoint body was not resident after apply')
 
-        bundle_before = deepcopy(harness.state.active_bundles)
-        harness.mark_all_skill_bodies_evicted()
+        bundle_before = deepcopy(control_plane.context_snapshot().maintained_bundles)
+        control_plane.mark_all_skill_bodies_evicted()
         canonical_body_present_before = 'powerpoint' in visible_body_ids(agent.history)
-        evicted = snapshot(harness)
-        retrieval_before = harness.retrieval_call_count
-        body_loads_before = harness.body_load_count
+        evicted = snapshot(control_plane)
+        retrieval_before = control_plane.turn_audit().retrieval_call_count
+        body_loads_before = control_plane.turn_audit().body_load_count
         phase = 'turn_2'
         answer = agent.run(TURN_2)
-        after = snapshot(harness)
+        after = snapshot(control_plane)
         second_tools = [event['tool'] for row in agent.trace
                         for event in row['tool_executions']]
         report['turns'].append({
@@ -133,12 +134,15 @@ def main():
                 and turn_two_wire[0]['eviction_tombstone_visible'],
             'post_reload_call_sees_body': len(turn_two_wire) >= 2
                 and 'powerpoint' in turn_two_wire[-1]['visible_body_ids'],
-            'turn_2_zero_retrieval': harness.retrieval_call_count == retrieval_before,
-            'turn_2_one_exact_body_load': harness.body_load_count == body_loads_before + 1,
+            'turn_2_zero_retrieval':
+                control_plane.turn_audit().retrieval_call_count == retrieval_before,
+            'turn_2_one_exact_body_load':
+                control_plane.turn_audit().body_load_count == body_loads_before + 1,
             'turn_2_only_load_skill_body': second_tools == ['load_skill_body'],
             'powerpoint_resident_after':
-                harness.state.skill_body_states['powerpoint'] == 'resident',
-            'bundle_unchanged': harness.state.active_bundles == bundle_before,
+                control_plane.context_snapshot().skill_body_states['powerpoint'] == 'resident',
+            'bundle_unchanged':
+                control_plane.context_snapshot().maintained_bundles == bundle_before,
         }
         report['checks'] = checks
         report['counterfactual_baseline'] = {

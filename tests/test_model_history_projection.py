@@ -6,7 +6,7 @@ import pytest
 from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.discovery import SkillDiscovery
-from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
+from skill_control_plane.runtime import SkillControlPlane
 from skill_control_plane.runtime.capability_memory import ActiveBundle, RuntimeCapabilityState
 from skill_control_plane.integrations.reference_agent import (
     EVICTED_BODY_TOMBSTONE, SUPERSEDED_BODY_TOMBSTONE,
@@ -31,8 +31,9 @@ def make_agent(*, powerpoint='resident', pdf='resident'):
     state = RuntimeCapabilityState([
         ActiveBundle('documents', 'Document work', ('powerpoint', 'pdf')),
     ], skill_body_states={'powerpoint': powerpoint, 'pdf': pdf})
-    harness = RuntimeCapabilityHarness(discovery=SkillDiscovery(registry), state=state)
-    return ExperimentalSkillAgent(harness.control_plane, NoCallClient())
+    control_plane = SkillControlPlane(
+        registry, discovery=SkillDiscovery(registry), state=state)
+    return ExperimentalSkillAgent(control_plane, NoCallClient())
 
 
 def paired_apply_history():
