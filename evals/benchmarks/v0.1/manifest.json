@@ -1,0 +1,18 @@
+{
+  "benchmark_version": "benchmark-v0.1",
+  "comparison": "Pi Native Skills vs Skill Control Plane",
+  "suites": {"scaling": "scaling.jsonl", "runtime": "runtime.jsonl"},
+  "fixture_catalog": "fixtures.json",
+  "result_schema": "schema.json",
+  "offline_cost_schema": "offline-cost.schema.json",
+  "arms": {
+    "native": {"pi_skills": true, "control_plane_adapter": false},
+    "control-plane": {"pi_skills": false, "control_plane_adapter": true}
+  },
+  "shared_execution": {"same_prompt": true, "same_fixture": true, "same_model_provider": true, "same_tool_permissions": true, "max_turns": 20, "timeout_seconds": 300, "mid_run_human_correction": false},
+  "corpora": ["S32", "S64", "S128"],
+  "scaling_matrix_cells": 96,
+  "runtime_matrix_cells": 40,
+  "full_matrix_enabled": false,
+  "smoke": {"scaling_task":"SC-01","scaling_corpus":"S32","runtime_task":"RT-S04","runtime_corpus":"S128","arms":["native","control-plane"]}
+}

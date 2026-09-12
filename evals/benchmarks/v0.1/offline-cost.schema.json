@@ -1,0 +1,8 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "title":"Offline benchmark artifact cost",
+  "oneOf":[
+    {"type":"object","required":["artifact_kind","telemetry_status","model","input_tokens","output_tokens","total_tokens","request_count","retry_count","wall_time_ms"],"properties":{"artifact_kind":{"const":"retrieval-card"},"telemetry_status":{"enum":["available","unavailable"]}}},
+    {"type":"object","required":["artifact_kind","telemetry_status","embedding_model","embedding_calls","embedding_input","embedding_input_unit","wall_time_ms","vector_count"],"properties":{"artifact_kind":{"const":"dense-index"},"telemetry_status":{"enum":["available","unavailable"]},"embedding_input_unit":{"enum":["tokens","characters","unavailable"]}}}
+  ]
+}

@@ -1,0 +1,4 @@
+[
+  {"artifact_kind":"retrieval-card","telemetry_status":"unavailable","model":"glm-4.5-air","input_tokens":null,"output_tokens":null,"total_tokens":null,"request_count":null,"retry_count":null,"wall_time_ms":null,"reason":"historical generation audit did not preserve complete token telemetry"},
+  {"artifact_kind":"dense-index","telemetry_status":"unavailable","embedding_model":"GLM-Embedding-3","embedding_calls":null,"embedding_input":null,"embedding_input_unit":"unavailable","wall_time_ms":null,"vector_count":128,"reason":"historical artifact metadata preserved vector count but not complete request/input telemetry"}
+]
