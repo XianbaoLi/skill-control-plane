@@ -112,6 +112,14 @@ creates a clean, new turn-local Discovery Session.
 is deprecated, retains the old combined resolver loader where needed, and is not
 used by the Reference Agent or exported as public API.
 
+A Python NDJSON stdio sidecar is available for future native adapters:
+
+```bash
+python -m skill_control_plane.sidecar \
+  --skill-root /path/to/skills \
+  --retrieval-cards /path/to/retrieval-cards-v0.1.jsonl
+```
+
 Corpus and evaluation commands are available through `skill-control-plane --help`.
 
 The single authoritative architecture and terminology reference is
