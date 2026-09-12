@@ -1,9 +1,8 @@
 """Cross-turn Bundle memory and Skill body residency."""
 from __future__ import annotations
 
-import json
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Literal, Mapping
 from uuid import uuid4
 
@@ -18,6 +17,50 @@ class ActiveBundle:
 
 
 BodyState = Literal["resident", "evicted"]
+
+
+@dataclass(frozen=True, slots=True)
+class BundleMemberSnapshot:
+    skill_id: str
+    name: str
+    body_state: BodyState
+    short_description: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BundleSnapshot:
+    bundle_id: str
+    purpose: str
+    capabilities: tuple[str, ...]
+    members: tuple[BundleMemberSnapshot, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CapabilityMemorySnapshot:
+    direct_skill_ids: tuple[str, ...]
+    maintained_bundles: tuple[BundleSnapshot, ...]
+
+    @property
+    def skill_body_states(self) -> dict[str, BodyState]:
+        return {
+            member.skill_id: member.body_state
+            for bundle in self.maintained_bundles
+            for member in bundle.members
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SkillBody:
+    skill_id: str
+    body: str
+
+
+@dataclass(frozen=True, slots=True)
+class SkillBodyLoadResult:
+    status: Literal["loaded", "already_resident"]
+    skill_id: str
+    bundle_ids: tuple[str, ...]
+    body: str | None = None
 
 
 @dataclass
@@ -154,29 +197,31 @@ class CapabilityMemory:
             offset += 1
         return selected
 
-    def render_bundle_card(self, *, compact: bool = True) -> str:
+    def snapshot(self, *, compact: bool = True) -> CapabilityMemorySnapshot:
+        """Return capability memory as data, never as provider-facing text."""
+
         capabilities = self._compact_capabilities if compact else self._old_capabilities
-        return json.dumps(
-            {"maintained_bundles": [
-                {
-                    "bundle_id": bundle.bundle_id,
-                    "purpose": bundle.purpose,
-                    "capabilities": capabilities(bundle.skill_ids),
-                    "members": [
-                        {
-                            "skill_id": skill_id,
-                            "name": self.store.get(skill_id).name,
-                            **({} if compact else {"short_description": " ".join(
-                                self.store.get(skill_id).description.split())[:240]}),
-                            "body_state": self.state.skill_body_states[skill_id],
-                        }
+        return CapabilityMemorySnapshot(
+            direct_skill_ids=tuple(sorted(self.state.direct_skills)),
+            maintained_bundles=tuple(
+                BundleSnapshot(
+                    bundle_id=bundle.bundle_id,
+                    purpose=bundle.purpose,
+                    capabilities=tuple(capabilities(bundle.skill_ids)),
+                    members=tuple(
+                        BundleMemberSnapshot(
+                            skill_id=skill_id,
+                            name=self.store.get(skill_id).name,
+                            body_state=self.state.skill_body_states[skill_id],
+                            short_description=(None if compact else " ".join(
+                                self.store.get(skill_id).description.split())[:240]),
+                        )
                         for skill_id in sorted(bundle.skill_ids)
-                    ],
-                }
-                for bundle in sorted(self.state.active_bundles, key=lambda item: item.bundle_id)
-            ]},
-            ensure_ascii=False,
-            separators=(",", ":"),
+                    ),
+                )
+                for bundle in sorted(
+                    self.state.active_bundles, key=lambda item: item.bundle_id)
+            ),
         )
 
     def commit(
@@ -186,7 +231,7 @@ class CapabilityMemory:
         skill_ids: tuple[str, ...],
         target_bundle_id: str | None = None,
         purpose: str | None = None,
-    ) -> tuple[str | None, list[dict[str, str]]]:
+    ) -> tuple[str | None, tuple[SkillBody, ...]]:
         for skill_id in skill_ids:
             self.store.get(skill_id)
         active = list(self.state.active_bundles)
@@ -222,14 +267,14 @@ class CapabilityMemory:
             if skill_id in bundle_skill_ids:
                 next_state.skill_body_states[skill_id] = "resident"
         validate_state(next_state, self.store)
-        bodies = [
-            {"skill_id": skill_id, "body": self.store.get(skill_id).body}
+        bodies = tuple(
+            SkillBody(skill_id, self.store.get(skill_id).body)
             for skill_id in skill_ids
-        ]
+        )
         self.state = next_state
         return target, bodies
 
-    def load_skill_body(self, skill_id: str) -> dict:
+    def load_skill_body(self, skill_id: str) -> SkillBodyLoadResult:
         validate_state(self.state, self.store)
         if not isinstance(skill_id, str) or not skill_id.strip():
             raise ValueError("load_skill_body requires a non-empty string skill_id")
@@ -240,13 +285,12 @@ class CapabilityMemory:
         if not bundle_ids:
             raise ValueError("load_skill_body requires a current Bundle member")
         if self.state.skill_body_states[skill_id] == "resident":
-            return {"status": "already_resident", "skill_id": skill_id,
-                    "bundle_ids": bundle_ids}
+            return SkillBodyLoadResult(
+                "already_resident", skill_id, tuple(bundle_ids))
         body = self.store.load_skill_body(skill_id)
         self.body_load_count += 1
         self.state.skill_body_states[skill_id] = "resident"
-        return {"status": "loaded", "skill_id": skill_id,
-                "bundle_ids": bundle_ids, "body": body}
+        return SkillBodyLoadResult("loaded", skill_id, tuple(bundle_ids), body)
 
     def mark_skill_body_evicted(self, skill_id: str) -> None:
         validate_state(self.state, self.store)
@@ -258,21 +302,3 @@ class CapabilityMemory:
         validate_state(self.state, self.store)
         for skill_id in self.state.skill_body_states:
             self.state.skill_body_states[skill_id] = "evicted"
-
-    def render_runtime_context(self) -> str:
-        return json.dumps({
-            "direct_skills": sorted(self.state.direct_skills),
-            "maintained_bundles": [
-                {
-                    **asdict(bundle),
-                    "skill_ids": sorted(bundle.skill_ids),
-                    "members": [
-                        {"skill_id": skill_id,
-                         "body_state": self.state.skill_body_states[skill_id]}
-                        for skill_id in sorted(bundle.skill_ids)
-                    ],
-                }
-                for bundle in sorted(self.state.active_bundles,
-                                     key=lambda item: item.bundle_id)
-            ],
-        }, ensure_ascii=False, separators=(",", ":"))

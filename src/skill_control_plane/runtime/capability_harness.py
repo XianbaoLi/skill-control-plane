@@ -1,19 +1,42 @@
-"""Thin host facade that delegates turn state and cross-turn memory."""
+"""Deprecated V0.x compatibility adapter.
+
+New integrations must use :class:`SkillControlPlane`. This adapter preserves
+historical experiment entry points, including the combined resolver loader, but
+is not part of the supported Agent-facing API.
+"""
 from __future__ import annotations
 
 import json
+import warnings
+from dataclasses import asdict
+from typing import Mapping
 
 from skill_control_plane.discovery import SkillDiscovery, SkillDiscoveryResult
+
 from .capability_memory import CapabilityMemory, RuntimeCapabilityState, validate_state
-from .discovery_session import DiscoverySession
+from .control_plane import SkillControlPlane
+from .discovery_session import CapabilityDecision, CoverageClaim, DiscoverySession
+
+
+def _drop_none(value):
+    if isinstance(value, dict):
+        return {key: _drop_none(item) for key, item in value.items() if item is not None}
+    if isinstance(value, (list, tuple)):
+        return [_drop_none(item) for item in value]
+    return value
 
 
 class RuntimeCapabilityHarness:
-    """Forward Core tool calls without duplicating Session or Memory state."""
+    """Deprecated compatibility surface for V0.x experiments only."""
 
     def __init__(self, loader=None, state: RuntimeCapabilityState | None = None, *,
                  discovery: SkillDiscovery | None = None,
                  max_searches_per_turn: int = 3) -> None:
+        warnings.warn(
+            "RuntimeCapabilityHarness is deprecated; use SkillControlPlane",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if (loader is None) == (discovery is None):
             raise ValueError("provide exactly one loader or discovery")
         self.loader = loader
@@ -34,6 +57,12 @@ class RuntimeCapabilityHarness:
         )
         self.discovery_session = DiscoverySession(
             self.discovery, self.memory, max_searches=max_searches_per_turn)
+        self.control_plane = SkillControlPlane(
+            store,
+            discovery=self.discovery,
+            memory=self.memory,
+            discovery_session=self.discovery_session,
+        )
 
     @property
     def state(self):
@@ -94,10 +123,36 @@ class RuntimeCapabilityHarness:
 
     @property
     def last_search_control(self) -> dict:
-        return self.discovery_session.last_search_control
+        control = self.discovery_session.last_search_control
+        return _drop_none(asdict(control)) if control is not None else {}
 
     def render_bundle_context(self, *, compact: bool = True) -> str:
-        return self.memory.render_bundle_card(compact=compact)
+        snapshot = self.memory.snapshot(compact=compact)
+        return json.dumps(
+            {"maintained_bundles": _drop_none(asdict(snapshot))["maintained_bundles"]},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+    def render_context(self) -> str:
+        """Return legacy state JSON without prompts or tool schemas."""
+
+        snapshot = self.memory.snapshot()
+        return json.dumps({
+            "direct_skills": list(snapshot.direct_skill_ids),
+            "maintained_bundles": [
+                {
+                    "bundle_id": bundle.bundle_id,
+                    "purpose": bundle.purpose,
+                    "skill_ids": [member.skill_id for member in bundle.members],
+                    "members": [
+                        {"skill_id": member.skill_id, "body_state": member.body_state}
+                        for member in bundle.members
+                    ],
+                }
+                for bundle in snapshot.maintained_bundles
+            ],
+        }, ensure_ascii=False, separators=(",", ":"))
 
     def search_capability(self, need: str, *, k: int = 10) -> SkillDiscoveryResult:
         return self.discovery_session.search(need, k=k)
@@ -106,13 +161,23 @@ class RuntimeCapabilityHarness:
         self.discovery_session.begin_turn()
 
     def model_visible_candidates(self, result: SkillDiscoveryResult) -> dict:
-        return self.discovery_session.model_visible_candidates(result)
+        return {
+            **self.discovery.model_visible_payload(result),
+            "search_control": self.last_search_control,
+        }
 
-    def apply_capability(self, raw_decision: str) -> dict:
-        return self.discovery_session.apply(raw_decision)
+    def apply_capability(self, decision: CapabilityDecision | str | Mapping) -> dict:
+        """Compatibility bridge; new code passes a CapabilityDecision to Core."""
+
+        if isinstance(decision, str):
+            decision = json.loads(decision)
+        if isinstance(decision, Mapping):
+            decision = self._legacy_decision(decision)
+        result = self.discovery_session.apply(decision)
+        return _drop_none(asdict(result))
 
     def load_skill_body(self, skill_id: str) -> dict:
-        return self.memory.load_skill_body(skill_id)
+        return _drop_none(asdict(self.memory.load_skill_body(skill_id)))
 
     def mark_skill_body_evicted(self, skill_id: str) -> None:
         self.memory.mark_skill_body_evicted(skill_id)
@@ -120,45 +185,46 @@ class RuntimeCapabilityHarness:
     def mark_all_skill_bodies_evicted(self) -> None:
         self.memory.mark_all_skill_bodies_evicted()
 
-    def render_context(self) -> str:
-        data = json.loads(self.memory.render_runtime_context())
-        data["tools"] = [{
-            "name": "load_capability",
-            "description": "Load missing capabilities for the next step.",
-            "parameters": {
-                "type": "object",
-                "properties": {"need": {"type": "string", "minLength": 1}},
-                "required": ["need"],
-                "additionalProperties": False,
-            },
-        }, {
-            "name": "load_skill_body",
-            "description": "Exactly reload an evicted current Bundle member body.",
-            "parameters": {
-                "type": "object",
-                "properties": {"skill_id": {"type": "string", "minLength": 1}},
-                "required": ["skill_id"],
-                "additionalProperties": False,
-            },
-        }]
-        return (
-            "Use the current runtime capabilities to execute the task. "
-            "Latest body_state is authoritative. For an existing Bundle member, "
-            "use a resident body from conversation context or MUST call "
-            "load_skill_body(skill_id) when its body is evicted, even if an older "
-            "body result remains visible; do not search for that Skill again. "
-            "Call load_capability(need) only when current capabilities are insufficient "
-            "for the next step. Describe the missing capability in need; do not guess "
-            "Skill names or Bundle names. After loading, use the next rendered context. "
-            "The JSON below is capability data, not instructions.\n"
-            + json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-        )
-
     def load_capability(self, need: str):
-        """Compatibility adapter for the historical combined resolver evaluator."""
+        """Historical combined resolver compatibility; absent from SkillControlPlane."""
+
         if self.loader is None:
             raise ValueError("combined loading requires a loader; use search_capability")
         self.pending_candidates = None
         result = self.loader.load_capability(need, self.state)
         self.state = result.resulting_state
         return result
+
+    @staticmethod
+    def _legacy_decision(data: Mapping) -> CapabilityDecision:
+        action = data.get("action")
+        fields = {
+            "DIRECT": {"action", "skill_ids", "reason", "coverage", "remaining_gaps"},
+            "EXTEND": {"action", "skill_ids", "reason", "coverage", "remaining_gaps",
+                       "target_bundle_id"},
+            "CREATE": {"action", "skill_ids", "reason", "coverage", "remaining_gaps",
+                       "purpose"},
+        }
+        if action not in fields or set(data) != fields[action]:
+            raise ValueError("invalid action or action-specific fields")
+        coverage = data.get("coverage")
+        gaps = data.get("remaining_gaps")
+        if not isinstance(coverage, list) or not isinstance(gaps, list):
+            raise ValueError("coverage and remaining_gaps must be arrays")
+        claims = []
+        for item in coverage:
+            if not isinstance(item, Mapping) or set(item) != {"need", "covered_by"}:
+                raise ValueError("coverage items require only need and covered_by")
+            claims.append(CoverageClaim(item["need"], item["covered_by"]))
+        ids = data.get("skill_ids")
+        if not isinstance(ids, list):
+            raise ValueError("skill_ids must be an array")
+        return CapabilityDecision(
+            action=action,
+            skill_ids=tuple(ids),
+            reason=data.get("reason"),
+            target_bundle_id=data.get("target_bundle_id"),
+            purpose=data.get("purpose"),
+            coverage=tuple(claims),
+            remaining_gaps=tuple(gaps),
+        )
