@@ -97,14 +97,14 @@ Candidate set. A new turn resets this state.
 
 ### Bundle
 
-A cross-turn maintained capability composition with a stable ID, reusable purpose
-and exact member `skill_id`s. A Bundle is not a filesystem category, a retrieval
-result group, or an ordinary Skill grouping.
+A cross-turn capability composition with a stable ID, reusable purpose and exact
+member `skill_id`s. Each member has role `maintained` or `direct`. A Bundle is not
+a filesystem category, a retrieval result group, or an ordinary Skill grouping.
 
 ### Bundle Card
 
 The compact, compression-resistant model surface for a Bundle: ID, purpose,
-bounded capability phrases, member identity and each member's latest body state.
+bounded capability phrases, member identity, `member_role`, and latest body state.
 It contains no full Skill Body.
 
 ### Skill Body
@@ -165,10 +165,16 @@ Discovery Session outcomes:
 
 Application actions:
 
-- `CREATE`: create a maintained Bundle with purpose and selected Candidate members;
-- `EXTEND`: add at least one new selected Candidate to an existing Bundle;
-- `DIRECT`: activate selected bodies temporarily in current model context without
-  creating, extending or writing a long-term Bundle.
+- `CREATE`: create a Bundle whose selected Candidate members are `maintained`;
+- `EXTEND`: add at least one new `maintained` Candidate member to an existing Bundle;
+- `DIRECT`: add at least one new Candidate to a reasonable existing Bundle with
+  role `direct`; it cannot implicitly create a Bundle.
+
+CREATE/EXTEND are the default maintained actions. DIRECT is reserved by the model
+instruction for clearly one-off or short-lived capabilities. A direct member is
+retained in Bundle metadata for future coverage and deduplication, but is not a
+core maintained member. This is a model-side soft selection rule plus a Core
+structural constraint, not a separate authorization policy.
 
 There is no current `REUSE` apply action. Bundle reuse is the zero-discovery path.
 
@@ -199,10 +205,11 @@ from validated behavior.
 
 ### Runtime — Capability Memory
 
-`runtime/capability_memory.py` is the authority for maintained Bundles, Bundle
-Cards, member body residency, eviction and metadata-first exact reload. It reads
-canonical records only through Skill Store. DIRECT activations may appear in the
-compatibility state/context surface, but never in maintained Bundle Cards.
+`runtime/capability_memory.py` is the authority for Bundles, Bundle Cards, member
+roles, body residency, eviction and metadata-first exact reload. It reads canonical
+records only through Skill Store. `RuntimeCapabilityState.direct_skills` remains a
+deprecated projection and V0.x detached-input boundary; new V1 DIRECT commits are
+represented only as Bundle members with role `direct`.
 
 ### Runtime — Skill Control Plane
 
@@ -241,7 +248,7 @@ new user turn
   6. Model either searches a distinct residual gap, reports UNSATISFIED, or calls
      apply_capability with coverage and remaining gaps.
   7. Discovery Session validates Candidate eligibility and action fields.
-  8. Capability Memory atomically CREATEs/EXTENDs a Bundle or returns DIRECT bodies.
+  8. Capability Memory atomically CREATEs a Bundle or adds maintained/direct members.
   9. Later compression may evict bodies while Bundle Cards survive.
  10. A needed known body is reloaded exactly; History Projection exposes only the
      latest resident occurrence.

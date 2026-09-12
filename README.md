@@ -46,14 +46,17 @@ user turn
   → uncovered gap: load_capability
   → one Discovery search; accumulate pending Candidates in Discovery Session
   → COVERED, SEARCH_MORE, or UNSATISFIED
-  → apply_capability with DIRECT, CREATE, or EXTEND
+  → apply_capability with CREATE/EXTEND by default, or scoped DIRECT
   → exact Skill Body delivery
-  → Bundle memory update for CREATE/EXTEND only
+  → Bundle memory update with maintained/direct member roles
   → History Projection hides evicted or superseded body text from the model
 ```
 
-DIRECT is a temporary activation in the current context; it does not create or
-extend long-term Bundle memory.
+CREATE makes a maintained Bundle and EXTEND adds maintained members. DIRECT is a
+lightweight member role for clearly one-off or short-lived capabilities: it must
+join a reasonable existing Bundle, remains in compact Bundle metadata for later
+coverage and deduplication, and never creates a Bundle. Both roles share the same
+`resident ↔ evicted ↔ load_skill_body` body lifecycle.
 
 ## Quick start
 
