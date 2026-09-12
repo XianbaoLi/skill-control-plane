@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from skill_control_plane.benchmarks.models import load_tasks, validate_result
@@ -15,6 +16,7 @@ from skill_control_plane.benchmarks.runner import resolve_bridge, run_one
 
 ROOT = Path(__file__).resolve().parents[1]
 BENCH = ROOT / "evals/benchmarks/v0.1"
+PRODUCTION_PROVIDER = "benchmark-bigmodel"
 
 
 def _task(task_id: str) -> dict:
@@ -25,6 +27,19 @@ def _task(task_id: str) -> dict:
         raise SystemExit(f"unknown task: {task_id}") from exc
 
 
+def _configured_chat_model() -> str:
+    model = os.environ.get("BIGMODEL_CHAT_MODEL")
+    if model:
+        return model
+    env_file = ROOT / ".env"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key.strip() == "BIGMODEL_CHAT_MODEL":
+                return value.strip().strip("\"'")
+    return ""
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -32,8 +47,8 @@ def main() -> int:
     run.add_argument("--task", required=True)
     run.add_argument("--arm", required=True, choices=("native", "control-plane"))
     run.add_argument("--corpus", required=True, choices=("S32", "S64", "S128"))
-    run.add_argument("--model", default="benchmark-faux-1")
-    run.add_argument("--provider")
+    run.add_argument("--model", help="explicit model override")
+    run.add_argument("--provider", help="explicit provider override")
     run.add_argument("--production", action="store_true",
                      help="use the real configured Pi provider/model bridge")
     run.add_argument("--output", type=Path, required=True)
@@ -49,10 +64,13 @@ def main() -> int:
         print(json.dumps(paired_report(rows, args.suite), ensure_ascii=False, indent=2))
         return 0
     task = _task(args.task)
-    if args.production and not args.provider:
-        parser.error("--production requires --provider")
-    if args.production and args.model == "benchmark-faux-1":
-        parser.error("--production requires an explicit --model")
+    if args.production:
+        args.model = args.model or _configured_chat_model()
+        if not args.model:
+            parser.error("--production requires BIGMODEL_CHAT_MODEL")
+        args.provider = args.provider or PRODUCTION_PROVIDER
+    else:
+        args.model = args.model or "benchmark-faux-1"
     fixtures = json.loads((BENCH / "fixtures.json").read_text(encoding="utf-8"))
     row = run_one(task=task, arm=args.arm, corpus=args.corpus, model=args.model,
                   fixture_spec=fixtures[task["fixture"]], output=args.output,

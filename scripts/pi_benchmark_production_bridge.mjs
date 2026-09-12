@@ -27,15 +27,24 @@ const corpus = required('BENCHMARK_CORPUS');
 const prompt = required('BENCHMARK_PROMPT');
 const workspace = required('BENCHMARK_WORKSPACE');
 const tracePath = required('BENCHMARK_TRACE');
-const providerId = required('BENCHMARK_PROVIDER');
-const modelId = required('BENCHMARK_MODEL');
+const providerId = process.env.BENCHMARK_PROVIDER || 'benchmark-bigmodel';
+const chatBaseUrl = required('BIGMODEL_CHAT_BASE_URL');
+const chatApiKey = required('BIGMODEL_CHAT_API_KEY');
+const modelId = required('BIGMODEL_CHAT_MODEL');
 const turns = JSON.parse(process.env.BENCHMARK_TURNS || '[]');
 const turnChecks = JSON.parse(process.env.BENCHMARK_TURN_CHECKS || '[]');
 if (!['native', 'control-plane'].includes(arm)) throw new Error(`invalid arm: ${arm}`);
 
 const openpi = process.env.OPENPI_ROOT ?? path.join(homedir(), 'workspace/openpi');
-const piRoot = process.env.PI_CORE_ROOT ?? path.join(openpi, 'node_modules/@earendil-works/pi-coding-agent');
-const pi = await import(pathToFileURL(path.join(piRoot, 'dist/index.js')));
+const piRoot = process.env.PI_CORE_ROOT ??
+  path.join(homedir(), '.npm-global/lib/node_modules/@earendil-works/pi-coding-agent');
+// Pi 0.85 bundles the usable SDK surface; its unbundled entry needs an optional
+// experimental-server peer that is not installed globally.
+const piEntry = ['dist/bundle/index.js', 'dist/index.js']
+  .map(relativeEntry => path.join(piRoot, relativeEntry))
+  .find(entry => existsSync(entry));
+if (!piEntry) throw new Error(`Pi SDK entry not found: ${piRoot}`);
+const pi = await import(pathToFileURL(piEntry));
 const agentDir = process.env.PI_AGENT_DIR ?? path.join(homedir(), '.pi/agent');
 const skillRoot = path.join(repo, 'local_artifacts/corpora/benchmark-corpus-v0.1', corpus, 'skills');
 let artifacts = path.join(repo, 'local_artifacts/benchmark-v0.1', corpus);
@@ -83,8 +92,35 @@ const settingsManager = pi.SettingsManager.inMemory(
   { projectTrusted: true },
 );
 const modelRuntime = await pi.ModelRuntime.create({
-  authPath: path.join(agentDir, 'auth.json'), modelsPath: path.join(agentDir, 'models.json'),
+  credentials: {
+    read: async () => undefined,
+    list: async () => [],
+    modify: async () => undefined,
+    delete: async () => undefined,
+  },
+  modelsPath: null,
+  allowModelNetwork: false,
+  refreshOnCreate: false,
 });
+modelRuntime.registerProvider(providerId, {
+  name: 'BigModel Chat (benchmark)',
+  baseUrl: chatBaseUrl,
+  api: 'openai-completions',
+  models: [{
+    id: modelId,
+    name: modelId,
+    reasoning: true,
+    thinkingLevelMap: { off: null, minimal: null, low: 'low', medium: null,
+      high: 'high', xhigh: null, max: 'max' },
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: Number(process.env.BENCHMARK_MODEL_CONTEXT_WINDOW || 1000000),
+    maxTokens: Number(process.env.BENCHMARK_MODEL_MAX_TOKENS || 131072),
+    compat: { supportsDeveloperRole: false, supportsReasoningEffort: true,
+      maxTokensField: 'max_tokens', thinkingFormat: 'zai', zaiToolStream: true },
+  }],
+});
+await modelRuntime.setRuntimeApiKey(providerId, chatApiKey);
 const model = modelRuntime.getModel(providerId, modelId);
 if (!model) throw new Error(`configured Pi model not found: ${providerId}/${modelId}`);
 
@@ -233,6 +269,12 @@ if (existsSync(embeddingTelemetry)) embeddingRows = (await readFile(embeddingTel
 const sha256 = async file => createHash('sha256').update(await readFile(file)).digest('hex');
 const gitSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
 const piVersion = JSON.parse(await readFile(path.join(piRoot, 'package.json'), 'utf8')).version;
+const endpointHost = new URL(chatBaseUrl).host;
+const embeddingIdentity = arm === 'control-plane' && existsSync(embeddingTelemetry)
+  ? { provider: 'benchmark-bigmodel-embedding',
+      model: required('BIGMODEL_EMBEDDING_MODEL'),
+      base_url_host: new URL(required('BIGMODEL_EMBEDDING_BASE_URL')).host }
+  : null;
 const trace = {
   events, usage, total_tool_calls: toolCalls.length,
   activated_skills: [...new Set(activations.flatMap(event => event.skill_ids))],
@@ -263,6 +305,7 @@ const trace = {
   experiment_identity: {
     pi_package: '@earendil-works/pi-coding-agent', pi_version: piVersion,
     provider: providerId, model: modelId,
+    base_url_host: endpointHost,
     reasoning_config: process.env.BENCHMARK_REASONING || null,
     temperature: process.env.BENCHMARK_TEMPERATURE ? Number(process.env.BENCHMARK_TEMPERATURE) : null,
     max_turns: maxTurns,
@@ -271,6 +314,8 @@ const trace = {
     retrieval_card_identity: await sha256(cards), dense_index_identity: await sha256(dense),
     adapter_commit_sha: gitSha,
   },
+  embedding_identity: embeddingIdentity,
 };
 await mkdir(path.dirname(tracePath), { recursive: true });
-await writeFile(tracePath, JSON.stringify(trace, null, 2) + '\n');
+const serializedTrace = JSON.stringify(trace, null, 2).split(chatApiKey).join('[REDACTED]');
+await writeFile(tracePath, serializedTrace + '\n');

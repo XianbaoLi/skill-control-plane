@@ -176,6 +176,7 @@ def run_one(*, task: dict[str, Any], arm: str, corpus: str, model: str,
                 "timeout_seconds": int(identity.get("timeout_seconds", timeout_seconds)),
                 "corpus_version": identity.get("corpus_version", "benchmark-corpus-v0.1"),
                 "corpus_subset": identity.get("corpus_subset", corpus),
+                "base_url_host": identity.get("base_url_host", ""),
                 "retrieval_card_identity": identity.get("retrieval_card_identity"),
                 "dense_index_identity": identity.get("dense_index_identity"),
                 "adapter_commit_sha": identity.get("adapter_commit_sha", "unknown")})

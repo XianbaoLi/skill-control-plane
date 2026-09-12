@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -12,7 +13,8 @@ from skill_control_plane.benchmarks.models import VERSION, load_tasks, validate_
 from skill_control_plane.benchmarks.reporter import paired_report
 from skill_control_plane.benchmarks.runner import (assert_gold_isolated,
     assert_identity_matches_run, gated_verifier_server, materialize_fixture,
-    materialize_host_verifier)
+    materialize_host_verifier, run_one)
+import scripts.benchmark_run as benchmark_run
 from skill_control_plane.benchmarks.scorer import _check, repeated_discovery_count, required_skill_recall, score_run
 from scripts.benchmark_validate import validate
 
@@ -36,7 +38,8 @@ def _result(**updates):
         "query_embedding_calls_total": 0, "wall_time_ms": 20, "total_tool_calls": 2,
         "control_plane_telemetry": {"retrieval_calls": None, "retrieval_events": None},
         "pi_package": "@earendil-works/pi-coding-agent", "pi_version": "0.84.1",
-        "provider": "fixture", "model": "fixture", "reasoning_config": None,
+        "provider": "fixture", "model": "fixture", "base_url_host": "api.example.test",
+        "reasoning_config": None,
         "temperature": None, "max_turns": 20, "timeout_seconds": 300,
         "corpus_version": "benchmark-corpus-v0.1", "corpus_subset": "S32",
         "retrieval_card_identity": "cards-sha", "dense_index_identity": "dense-sha",
@@ -151,6 +154,86 @@ def test_production_bridge_has_tool_parity_and_real_resume_path():
     assert "SessionManager.open(sessionFile" in source
     assert "session_shutdown" in source and "turnMetrics.push" in source
     assert "faux" not in source.casefold() and "target_skill" not in source
+
+
+def test_production_model_registration_is_benchmark_only():
+    source = (ROOT / "scripts/pi_benchmark_production_bridge.mjs").read_text()
+    assert "process.env.BENCHMARK_PROVIDER || 'benchmark-bigmodel'" in source
+    for name in ("BIGMODEL_CHAT_BASE_URL", "BIGMODEL_CHAT_API_KEY", "BIGMODEL_CHAT_MODEL"):
+        assert f"required('{name}')" in source
+    assert "modelsPath: null" in source
+    assert "allowModelNetwork: false" in source
+    assert "modelRuntime.registerProvider(providerId" in source
+    assert "await modelRuntime.setRuntimeApiKey(providerId, chatApiKey)" in source
+    assert "path.join(agentDir, 'auth.json')" not in source
+    assert "models-store.json" not in source
+    assert "base_url_host: endpointHost" in source
+    assert ".split(chatApiKey).join('[REDACTED]')" in source
+    embedding = source[source.index("const embeddingIdentity"):
+                       source.index("const trace = {", source.index("const embeddingIdentity"))]
+    assert "BIGMODEL_EMBEDDING_MODEL" in embedding
+    assert "BIGMODEL_EMBEDDING_BASE_URL" in embedding
+    assert "BIGMODEL_CHAT_" not in embedding
+
+
+def test_production_fails_closed_when_chat_model_config_is_missing(tmp_path, monkeypatch):
+    pi_root = Path.home() / ".npm-global/lib/node_modules/@earendil-works/pi-coding-agent"
+    if not (pi_root / "dist/bundle/index.js").exists():
+        pytest.skip("Pi 0.85 global installation is not present")
+    base = {"PATH": os.environ["PATH"], "PI_CORE_ROOT": str(pi_root),
+            "BENCHMARK_ARM": "native", "BENCHMARK_CORPUS": "S32",
+            "BENCHMARK_PROMPT": "ping", "BENCHMARK_WORKSPACE": str(tmp_path / "work"),
+            "BENCHMARK_TRACE": str(tmp_path / "trace.json")}
+    for name, required_name in (
+        ("BIGMODEL_CHAT_BASE_URL", "BIGMODEL_CHAT_API_KEY"),
+        ("BIGMODEL_CHAT_API_KEY", "BIGMODEL_CHAT_MODEL"),
+        ("BIGMODEL_CHAT_MODEL", "BIGMODEL_CHAT_BASE_URL"),
+    ):
+        env = dict(base)
+        env[required_name] = "config-present"
+        completed = subprocess.run(
+            ["node", str(ROOT / "scripts/pi_benchmark_production_bridge.mjs")],
+            cwd=tmp_path, env=env, text=True, capture_output=True,
+        )
+        assert completed.returncode != 0
+        assert "missing BIGMODEL_CHAT_" in completed.stderr
+
+
+def test_production_default_uses_chat_model_env(tmp_path, monkeypatch):
+    monkeypatch.setattr(benchmark_run, "ROOT", tmp_path)
+    monkeypatch.setenv("BIGMODEL_CHAT_MODEL", "env-chat-model")
+    assert benchmark_run._configured_chat_model() == "env-chat-model"
+    monkeypatch.delenv("BIGMODEL_CHAT_MODEL")
+    (tmp_path / ".env").write_text("OTHER_KEY=ignored\nBIGMODEL_CHAT_MODEL=file-chat-model\n")
+    assert benchmark_run._configured_chat_model() == "file-chat-model"
+
+
+def test_native_and_control_plane_share_production_model_identity(tmp_path):
+    task = next(t.raw for t in load_tasks(BENCH / "scaling.jsonl") if t.task_id == "SC-01")
+    fixture = json.loads((BENCH / "fixtures.json").read_text())[task["fixture"]]
+    bridge = tmp_path / "fake_bridge.py"
+    bridge.write_text(
+        "import json, os\n"
+        "identity = {'pi_package': 'pi', 'pi_version': 'test',\n"
+        "            'provider': os.environ['BENCHMARK_PROVIDER'],\n"
+        "            'model': os.environ['BENCHMARK_MODEL'],\n"
+        "            'base_url_host': 'api.example.test',\n"
+        "            'corpus_subset': 'S32', 'timeout_seconds': 300,\n"
+        "            'corpus_version': 'benchmark-corpus-v0.1',\n"
+        "            'retrieval_card_identity': 'cards',\n"
+        "            'dense_index_identity': 'dense',\n"
+        "            'adapter_commit_sha': 'abc'}\n"
+        "with open(os.environ['BENCHMARK_TRACE'], 'w') as handle:\n"
+        "    json.dump({'events': [], 'usage': {'input': 1, 'output': 1},\n"
+        "               'experiment_identity': identity}, handle)\n"
+    )
+    rows = []
+    for arm in ("native", "control-plane"):
+        rows.append(run_one(task=task, arm=arm, corpus="S32", model="chat-model",
+                            fixture_spec=fixture, output=tmp_path / arm,
+                            command=[sys.executable, str(bridge)], provider="benchmark-bigmodel"))
+    assert [(row["provider"], row["model"], row["base_url_host"]) for row in rows] == \
+        [("benchmark-bigmodel", "chat-model", "api.example.test")] * 2
 
 
 def test_reuse_scoring_requires_both_turn_checks_and_restore(tmp_path):

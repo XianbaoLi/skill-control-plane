@@ -20,7 +20,8 @@ NONNEGATIVE_FIELDS = (
 )
 
 IDENTITY_FIELDS = (
-    "pi_package", "pi_version", "provider", "model", "reasoning_config",
+    "pi_package", "pi_version", "provider", "model", "base_url_host",
+    "reasoning_config",
     "temperature", "max_turns", "timeout_seconds", "corpus_version",
     "corpus_subset", "retrieval_card_identity", "dense_index_identity",
     "adapter_commit_sha",
@@ -141,9 +142,9 @@ def validate_result(row: dict[str, Any]) -> BenchmarkResult:
         for key in ("bundle_create_count", "bundle_extend_count", "bundle_reuse_count"):
             _require(isinstance(row[key], int) and row[key] >= 0,
                      f"control-plane {key} must be non-negative")
-    for key in ("pi_package", "pi_version", "provider", "model", "corpus_version",
-                "corpus_subset", "retrieval_card_identity", "dense_index_identity",
-                "adapter_commit_sha"):
+    for key in ("pi_package", "pi_version", "provider", "model", "base_url_host",
+                "corpus_version", "corpus_subset", "retrieval_card_identity",
+                "dense_index_identity", "adapter_commit_sha"):
         _require(isinstance(row[key], str) and bool(row[key]), f"{key} must be non-empty")
     for key in ("max_turns", "timeout_seconds"):
         _require(isinstance(row[key], int) and row[key] > 0, f"{key} must be positive")
