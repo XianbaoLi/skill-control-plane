@@ -32,11 +32,13 @@ def test_frozen_snapshot_and_compressed_history_are_identical_across_arms():
     module = experiment_module()
     visible = module.make_agent(discovery(), Client(), visible=True)
     hidden = module.make_agent(discovery(), Client(), visible=False)
-    assert visible.harness.state == hidden.harness.state == module.frozen_runtime_state()
+    assert visible.control_plane.context_snapshot() == hidden.control_plane.context_snapshot()
     assert visible.history == hidden.history == list(module.COMPRESSED_HISTORY)
-    assert visible.harness.state.skill_body_states == {'powerpoint': 'evicted'}
-    assert visible.harness.state.active_bundles[0].bundle_id == 'presentation-work'
-    assert visible.harness.state.active_bundles[0].skill_ids == ('powerpoint',)
+    snapshot = visible.control_plane.context_snapshot()
+    assert snapshot.skill_body_states == {'powerpoint': 'evicted'}
+    assert snapshot.maintained_bundles[0].bundle_id == 'presentation-work'
+    assert tuple(member.skill_id for member in snapshot.maintained_bundles[0].members) \
+        == ('powerpoint',)
     assert json.loads(json.dumps(module.runtime_snapshot()))['direct_skills'] == []
 
 

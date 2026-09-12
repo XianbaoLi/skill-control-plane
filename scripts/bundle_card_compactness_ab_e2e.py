@@ -17,7 +17,7 @@ from skill_control_plane.discovery.cards import load_retrieval_cards
 from skill_control_plane.discovery.discovery import SkillDiscovery
 from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
 from skill_control_plane.runtime.capability_memory import ActiveBundle, RuntimeCapabilityState
-from skill_control_plane.integrations.reference_agent import ExperimentalSkillAgent
+from skill_control_plane.integrations.reference_agent import ExperimentalSkillAgent, dto_payload
 
 
 ROOT = Path('local_artifacts/v0.5/hermes-current87')
@@ -86,7 +86,10 @@ class OldBundleCardAgent(ExperimentalSkillAgent):
     def render_system_context(self):
         compact = super().render_system_context()
         prefix, _surface = compact.split(SURFACE_MARKER, 1)
-        return prefix + SURFACE_MARKER + self.harness.render_bundle_context(compact=False)
+        snapshot = dto_payload(self.control_plane.context_snapshot(compact=False))
+        return prefix + SURFACE_MARKER + json.dumps(
+            {'maintained_bundles': snapshot['maintained_bundles']},
+            ensure_ascii=False, separators=(',', ':'))
 
 
 class RecordingClient:
@@ -109,7 +112,8 @@ def make_agent(discovery, client, *, category, surface):
     harness = RuntimeCapabilityHarness(
         discovery=discovery, state=deepcopy(behavior_state(category)))
     agent_type = OldBundleCardAgent if surface == 'old' else ExperimentalSkillAgent
-    agent = agent_type(harness, client, max_steps=8)
+    agent = agent_type(harness.control_plane, client, max_steps=8)
+    agent._experiment_harness = harness
     agent.history = canonical_history(discovery.records['powerpoint'].body)
     return agent
 
@@ -158,7 +162,10 @@ def classify(category, audit, trace, answer):
 def run_case(discovery, glm, *, case_id, category, task, surface):
     recorder = RecordingClient(glm)
     agent = make_agent(discovery, recorder, category=category, surface=surface)
-    card = agent.harness.render_bundle_context(compact=(surface == 'compact'))
+    snapshot = dto_payload(agent.control_plane.context_snapshot(
+        compact=(surface == 'compact')))
+    card = json.dumps({'maintained_bundles': snapshot['maintained_bundles']},
+                      ensure_ascii=False, separators=(',', ':'))
     model_history_before = agent.build_model_history()
     projection_before = deepcopy(agent._last_history_projection)
     started = monotonic()

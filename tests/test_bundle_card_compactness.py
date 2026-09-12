@@ -46,7 +46,7 @@ def test_ab_agents_differ_only_in_bundle_surface():
     compact_prefix, compact_card = compact_system.split(experiment.SURFACE_MARKER, 1)
     assert old_prefix == compact_prefix
     assert old.history == compact.history
-    assert old.harness.state == compact.harness.state
+    assert old.control_plane.context_snapshot() == compact.control_plane.context_snapshot()
     assert old_card != compact_card
     assert 'short_description' in old_card
     assert 'short_description' not in compact_card

@@ -91,7 +91,7 @@ def main():
                 return chat.complete_messages(messages, tools=tools)
 
         client = WireAuditClient()
-        agent = ExperimentalSkillAgent(harness, client, max_steps=8)
+        agent = ExperimentalSkillAgent(harness.control_plane, client, max_steps=8)
 
         before = snapshot(harness)
         answer = agent.run(TURN_1)

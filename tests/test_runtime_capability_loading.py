@@ -177,7 +177,7 @@ def test_create_can_coexist_with_existing_bundle(discovery):
 
 
 def context_data(harness):
-    return json.loads(harness.render_context().split('\n', 1)[1])
+    return json.loads(harness.render_context())
 
 
 def test_harness_stable_compact_context_without_library(discovery, monkeypatch):
@@ -202,13 +202,8 @@ def test_harness_stable_compact_context_without_library(discovery, monkeypatch):
          'members': [{'skill_id': 'email', 'body_state': 'evicted'},
                      {'skill_id': 'pdf', 'body_state': 'evicted'}]},
     ]
-    tool = data['tools'][0]
-    assert tool['name'] == 'load_capability'
-    assert tool['parameters']['required'] == ['need']
-    assert data['tools'][1]['name'] == 'load_skill_body'
-    assert 'load_capability(need)' in harness.render_context()
-    assert 'only when current capabilities are insufficient' in harness.render_context()
-    assert 'do not guess Skill names or Bundle names' in harness.render_context()
+    assert 'tools' not in data
+    assert 'load_capability(need)' not in harness.render_context()
     assert 'hidden' not in harness.render_context()
     assert 'unrelated astronomy' not in harness.render_context()
     assert 'GitHub pull request review' not in harness.render_context()

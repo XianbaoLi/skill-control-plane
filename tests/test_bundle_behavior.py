@@ -170,9 +170,9 @@ def test_protocol_error_keeps_same_conversation_for_following_tasks(discovery):
     report = run_experiment(discovery, client)
     assert report['status'] == 'completed'
     assert len(report['turns']) == 4
-    assert report['turns'][0]['trace'][2]['tool_error']['type'] == 'JSONDecodeError'
+    assert report['turns'][0]['trace'][2]['tool_error']['type'] == 'ValueError'
     assert report['evaluations'][0]['checks']['turn_completed']
     assert report['turns'][1]['status'] == 'completed'
     assert report['turns'][1]['state_before'] == report['turns'][0]['state_after']
-    assert any(message['role'] == 'tool' and json.loads(message['content']).get('error', {}).get('type') == 'JSONDecodeError'
+    assert any(message['role'] == 'tool' and json.loads(message['content']).get('error', {}).get('type') == 'ValueError'
                for message in report['history'])

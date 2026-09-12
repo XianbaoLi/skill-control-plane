@@ -81,7 +81,7 @@ def make_agent(discovery, client, *, visible):
         state=deepcopy(frozen_runtime_state()),
     )
     agent_type = ExperimentalSkillAgent if visible else HiddenBundleAgent
-    agent = agent_type(harness, client, max_steps=8)
+    agent = agent_type(harness.control_plane, client, max_steps=8)
     agent.history = deepcopy(list(COMPRESSED_HISTORY))
     return agent
 

@@ -200,7 +200,7 @@ def run_case(case, discovery, glm):
     harness = CaseHarness(
         discovery=discovery, state=deepcopy(state_for(case)),
         candidate_window=case.get('candidate_window', 10))
-    agent = ExperimentalSkillAgent(harness, recorder, max_steps=10)
+    agent = ExperimentalSkillAgent(harness.control_plane, recorder, max_steps=10)
     agent.history = seeded_history(case, discovery)
     started = monotonic()
     answer = agent.run(case['task'])

@@ -81,7 +81,7 @@ def test_native_search_apply_bodies_history_and_bundle_surface(harness, action):
             kwargs['target_bundle_id'] = 'mail-work'
         return apply(action, **kwargs)
     client = ScriptedClient([load(), check_search, FINAL])
-    agent = ExperimentalSkillAgent(harness, client)
+    agent = ExperimentalSkillAgent(harness.control_plane, client)
     assert agent.run('Document task') == FINAL['content']
     assert len(client.calls) == 3
     for index, call in enumerate(client.calls):
@@ -118,7 +118,7 @@ def test_native_search_apply_bodies_history_and_bundle_surface(harness, action):
 ])
 def test_invalid_native_application_preserves_state_and_pairs_error_result(harness, decision):
     before = deepcopy(harness.state)
-    agent = ExperimentalSkillAgent(harness, ScriptedClient([load(), decision, FINAL]))
+    agent = ExperimentalSkillAgent(harness.control_plane, ScriptedClient([load(), decision, FINAL]))
     assert agent.run('Document task') == FINAL['content']
     assert harness.state == before
     assert agent.history[-2]['tool_call_id'] == decision['tool_calls'][0]['id']
@@ -150,7 +150,7 @@ def test_merged_candidates_and_single_use(harness):
 def test_multiple_loads_multi_direct_and_repeated_selection_across_runs(harness):
     client = ScriptedClient([load('email'), load(), apply(skill_ids=['pdf', 'pdf']), FINAL,
                             load(), apply('CREATE', purpose='Docs', skill_ids=['pdf', 'slides']), FINAL, FINAL])
-    agent = ExperimentalSkillAgent(harness, client)
+    agent = ExperimentalSkillAgent(harness.control_plane, client)
     agent.run('first task')
     previous = deepcopy(agent.history)
     agent.run('Maintain documents')
@@ -171,7 +171,7 @@ def test_multiple_loads_multi_direct_and_repeated_selection_across_runs(harness)
 @pytest.mark.parametrize('content', ['hello', '{not JSON}', 'text with "quotes"\nand newlines'])
 def test_plain_assistant_content_is_final(harness, content):
     client = ScriptedClient([{'role': 'assistant', 'content': content}])
-    agent = ExperimentalSkillAgent(harness, client)
+    agent = ExperimentalSkillAgent(harness.control_plane, client)
     assert agent.run('say hello') == content
     assert agent.history[-1]['content'] == content
     assert not harness.loaded_skill_ids
@@ -184,7 +184,7 @@ def test_plain_assistant_content_is_final(harness, content):
     {'role': 'assistant', 'tool_calls': [{'id': 'x', 'type': 'function', 'function': {}}]},
 ])
 def test_protocol_errors_traced_without_mutating_state(harness, message):
-    agent = ExperimentalSkillAgent(harness, ScriptedClient([message, FINAL]))
+    agent = ExperimentalSkillAgent(harness.control_plane, ScriptedClient([message, FINAL]))
     if not message.get('tool_calls'):
         with pytest.raises(ValueError):
             agent.run('task')
@@ -201,20 +201,20 @@ def test_protocol_errors_traced_without_mutating_state(harness, message):
 def test_duplicate_argument_keys_rejected(harness):
     message = load()
     message['tool_calls'][0]['function']['arguments'] = '{"need":"PDF","need":"slides"}'
-    agent = ExperimentalSkillAgent(harness, ScriptedClient([message, FINAL]))
+    agent = ExperimentalSkillAgent(harness.control_plane, ScriptedClient([message, FINAL]))
     assert agent.run('task') == FINAL['content']
     assert not harness.loaded_skill_ids
     assert agent.history[-2]['tool_call_id'] == message['tool_calls'][0]['id']
 
 
 def test_step_limit_and_provider_failure(harness):
-    agent = ExperimentalSkillAgent(harness, ScriptedClient([load()]), max_steps=1)
+    agent = ExperimentalSkillAgent(harness.control_plane, ScriptedClient([load()]), max_steps=1)
     with pytest.raises(AgentStepLimitError):
         agent.run('task')
     assert agent.history[-1]['role'] == 'tool'
     def fail(messages):
         raise RuntimeError('provider unavailable')
-    agent = ExperimentalSkillAgent(harness, ScriptedClient([fail]))
+    agent = ExperimentalSkillAgent(harness.control_plane, ScriptedClient([fail]))
     with pytest.raises(RuntimeError):
         agent.run('task')
     assert agent.trace[0]['state_before'] == agent.trace[0]['state_after']
@@ -223,11 +223,11 @@ def test_step_limit_and_provider_failure(harness):
 def test_extend_requires_new_member_and_changes_only_target(harness):
     harness.state = RuntimeCapabilityState([
         ActiveBundle('a', 'Docs', ('pdf',)), ActiveBundle('b', 'Mail', ('mail',))])
-    agent = ExperimentalSkillAgent(harness, ScriptedClient([
+    agent = ExperimentalSkillAgent(harness.control_plane, ScriptedClient([
         load(), apply('EXTEND', target_bundle_id='a'), FINAL]))
     assert agent.run('task') == FINAL['content']
     assert agent.trace[1]['tool_error']['type'] == 'ValueError'
-    agent = ExperimentalSkillAgent(harness, ScriptedClient([
+    agent = ExperimentalSkillAgent(harness.control_plane, ScriptedClient([
         load(), apply('EXTEND', target_bundle_id='a', skill_ids=['slides']), FINAL]))
     agent.run('Make slides')
     assert harness.state.active_bundles[0].skill_ids == ('pdf', 'slides')
@@ -238,7 +238,7 @@ def test_no_independent_resolver_or_combined_loader(harness, monkeypatch):
     def forbidden(*args, **kwargs):
         pytest.fail('independent resolver/combined loader must not run')
     monkeypatch.setattr(harness, 'load_capability', forbidden)
-    ExperimentalSkillAgent(harness, ScriptedClient([load(), apply(), FINAL])).run('task')
+    ExperimentalSkillAgent(harness.control_plane, ScriptedClient([load(), apply(), FINAL])).run('task')
 
 
 def test_failed_new_search_preserves_previous_candidates(harness, monkeypatch):
@@ -286,7 +286,7 @@ def test_load_capability_model_surface_hides_full_retrieval_record(harness):
     harness.discovery.records['pdf'] = replace(
         harness.discovery.records['pdf'], retrieval_representation='SECRET_FULL_CARD')
     harness.discovery.texts['pdf'] = 'SECRET_FULL_CARD'
-    agent = ExperimentalSkillAgent(harness, ScriptedClient([load('PDF'), FINAL]))
+    agent = ExperimentalSkillAgent(harness.control_plane, ScriptedClient([load('PDF'), FINAL]))
     agent.run('task')
     tool_payload = json.loads(agent.history[-2]['content'])
     rendered = json.dumps(tool_payload)
@@ -304,13 +304,13 @@ def test_full_assistant_preserved_multiple_calls_and_paired_batch_failure(harnes
     message.update(content='Let me look.', reasoning_content='Preserve provider reasoning')
     message['tool_calls'].append(load('slides')['tool_calls'][0])
     client = ScriptedClient([message, FINAL])
-    agent = ExperimentalSkillAgent(harness, client)
+    agent = ExperimentalSkillAgent(harness.control_plane, client)
     agent.run('task')
     assert client.calls[1][2] == message
     assert [m['tool_call_id'] for m in client.calls[1][3:]] == [c['id'] for c in message['tool_calls']]
     bad = tool('unknown', {})
     bad['tool_calls'].append(load()['tool_calls'][0])
-    agent = ExperimentalSkillAgent(harness, ScriptedClient([bad, FINAL, FINAL]))
+    agent = ExperimentalSkillAgent(harness.control_plane, ScriptedClient([bad, FINAL, FINAL]))
     assert agent.run('task') == FINAL['content']
     tool_results = [m for m in agent.history if m['role'] == 'tool']
     assert [m['tool_call_id'] for m in tool_results[-2:]] == [c['id'] for c in bad['tool_calls']]
@@ -321,7 +321,7 @@ def test_full_assistant_preserved_multiple_calls_and_paired_batch_failure(harnes
 def test_duplicate_call_ids_rejected_before_history_append(harness):
     message = load()
     message['tool_calls'] *= 2
-    agent = ExperimentalSkillAgent(harness, ScriptedClient([message]))
+    agent = ExperimentalSkillAgent(harness.control_plane, ScriptedClient([message]))
     with pytest.raises(ValueError, match='duplicate'):
         agent.run('task')
     assert len(agent.history) == 1
@@ -347,7 +347,7 @@ def test_multi_search_retry_and_search_local_history(harness, bad):
         searches = [json.loads(m['content']) for m in messages if m['role'] == 'tool'][:2]
         assert [[c['skill_id'] for c in r['candidates']] for r in searches] == [['pdf'], ['mail']]
         return apply(skill_ids=['pdf', 'mail'])
-    agent = ExperimentalSkillAgent(harness, ScriptedClient([
+    agent = ExperimentalSkillAgent(harness.control_plane, ScriptedClient([
         load('PDF'), load('email inbox'), bad, retry, FINAL]))
     agent.run('two capabilities')
     assert harness.state.direct_skills == {'pdf', 'mail'}
@@ -356,7 +356,7 @@ def test_multi_search_retry_and_search_local_history(harness, bad):
 
 
 def test_final_discards_uncommitted_pool(harness):
-    agent = ExperimentalSkillAgent(harness, ScriptedClient([load('PDF'), FINAL, apply(), FINAL]))
+    agent = ExperimentalSkillAgent(harness.control_plane, ScriptedClient([load('PDF'), FINAL, apply(), FINAL]))
     agent.run('search only')
     assert agent.trace[-1]['pending_pool_before'] == ['pdf']
     assert agent.trace[-1]['pending_pool_after'] == []
@@ -367,7 +367,7 @@ def test_final_discards_uncommitted_pool(harness):
 
 
 def test_new_turn_discards_pool_left_by_interrupted_turn(harness):
-    agent = ExperimentalSkillAgent(harness, ScriptedClient([load('PDF'), apply()]), max_steps=1)
+    agent = ExperimentalSkillAgent(harness.control_plane, ScriptedClient([load('PDF'), apply()]), max_steps=1)
     with pytest.raises(AgentStepLimitError):
         agent.run('interrupted')
     assert harness.pending_candidates is not None
@@ -393,7 +393,7 @@ def test_second_search_provider_failure_can_recover_in_same_agent(harness, monke
             raise RuntimeError('dense failure')
         return discover(need, **kwargs)
     monkeypatch.setattr(harness.discovery, 'discover_skills', search)
-    agent = ExperimentalSkillAgent(harness, ScriptedClient([
+    agent = ExperimentalSkillAgent(harness.control_plane, ScriptedClient([
         load('PDF'), load('email'), apply(), FINAL]))
     agent.run('task')
     assert agent.trace[1]['pending_pool_before'] == agent.trace[1]['pending_pool_after'] == ['pdf']
@@ -407,7 +407,7 @@ def test_missing_reason_preserves_pool_for_retry(harness):
         'action': 'DIRECT', 'skill_ids': ['pdf'],
         'coverage': [{'need': 'PDF', 'covered_by': 'skill:pdf'}],
         'remaining_gaps': []})
-    agent = ExperimentalSkillAgent(harness, ScriptedClient([load('PDF'), missing, apply(), FINAL]))
+    agent = ExperimentalSkillAgent(harness.control_plane, ScriptedClient([load('PDF'), missing, apply(), FINAL]))
     agent.run('task')
     assert agent.trace[1]['tool_error']['type'] == 'ValueError'
     assert agent.trace[1]['state_before'] == agent.trace[1]['state_after']
@@ -427,7 +427,7 @@ def test_live_multi_search_audit_requires_joint_exclusive_selection(harness, que
                                    'scripts/experimental_skill_agent_e2e.py')
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
-    agent = ExperimentalSkillAgent(harness, ScriptedClient([
+    agent = ExperimentalSkillAgent(harness.control_plane, ScriptedClient([
         *[load(q) for q in queries], apply(skill_ids=ids), FINAL]))
     agent.run('task')
     assert module.audit_multi_search(agent)['passed'] is expected

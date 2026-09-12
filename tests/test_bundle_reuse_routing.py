@@ -163,7 +163,7 @@ def test_bundle_first_policy_includes_trigger_and_sufficiency_protocol():
 def test_resident_reuse_turn_audit_has_zero_tool_and_retrieval_calls():
     runtime = harness()
     agent = ExperimentalSkillAgent(
-        runtime, Client([{'role': 'assistant', 'content': 'Reused.'}]))
+        runtime.control_plane, Client([{'role': 'assistant', 'content': 'Reused.'}]))
     before = runtime.retrieval_call_count
     assert agent.run('继续修改这个 presentation') == 'Reused.'
     audit = agent.turn_audit
@@ -181,7 +181,7 @@ def test_resident_reuse_turn_audit_has_zero_tool_and_retrieval_calls():
 
 def test_evicted_reload_turn_audit_has_exact_load_only():
     runtime = harness('evicted')
-    agent = ExperimentalSkillAgent(runtime, Client([
+    agent = ExperimentalSkillAgent(runtime.control_plane, Client([
         native('load_skill_body', {'skill_id': 'powerpoint'}),
         {'role': 'assistant', 'content': 'Reloaded.'},
     ]))
@@ -199,7 +199,7 @@ def test_evicted_reload_turn_audit_has_exact_load_only():
 def test_evicted_metadata_reuse_is_not_mislabeled_resident_reuse():
     runtime = harness('evicted')
     agent = ExperimentalSkillAgent(
-        runtime, Client([{'role': 'assistant', 'content': 'Skipped.'}]))
+        runtime.control_plane, Client([{'role': 'assistant', 'content': 'Skipped.'}]))
     agent.run('继续改刚才 PPT 的第三页')
     assert agent.turn_audit['bundle_reuse_outcome'] == 'bundle_metadata_reuse'
 
@@ -207,7 +207,7 @@ def test_evicted_metadata_reuse_is_not_mislabeled_resident_reuse():
 def test_gap_trace_records_discovery_without_host_side_shortcut():
     runtime = harness()
     state_before = deepcopy(runtime.state)
-    agent = ExperimentalSkillAgent(runtime, Client([
+    agent = ExperimentalSkillAgent(runtime.control_plane, Client([
         native('load_capability', {'need': 'export spreadsheet data to Excel'}),
         {'role': 'assistant', 'content': 'Candidates inspected.'},
     ]))

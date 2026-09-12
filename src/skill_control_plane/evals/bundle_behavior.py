@@ -113,7 +113,8 @@ def run_experiment(discovery: SkillDiscovery, client: ConversationClient, *,
             return response
 
     harness = RuntimeCapabilityHarness(discovery=discovery)
-    agent = ExperimentalSkillAgent(harness, RecordingClient(), max_steps=max_steps)
+    agent = ExperimentalSkillAgent(
+        harness.control_plane, RecordingClient(), max_steps=max_steps)
     for number, task in enumerate(TASKS, 1):
         history_start = len(agent.history)
         call_start = len(report['model_calls'])

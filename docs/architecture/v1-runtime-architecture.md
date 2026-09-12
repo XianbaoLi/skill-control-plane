@@ -11,11 +11,12 @@ V1 narrows the production path to five layers and one sidecar:
 ```text
 integrations
     ├── tool schemas and native tool loop
-    ├── Bundle/context injection
+    ├── structured Bundle/context injection and JSON serialization
     └── History Projection
               ↓
-runtime/discovery_session ──→ discovery ──→ registry
+runtime/SkillControlPlane ──→ discovery ──→ registry
               │                              ↑
+              ├── coordinates ──→ runtime/discovery_session
               └── coordinates ──→ runtime/capability_memory
 
 evals ──→ production modules       (sidecar only)
@@ -37,6 +38,28 @@ The following are forbidden and enforced by tests:
 
 The CLI exposes corpus and evaluation utilities. It is not an additional runtime
 layer. OpenPI/Hermes migration and a unified Agent API are outside V1.
+
+## Public boundary
+
+`SkillControlPlane` is the only supported Agent-facing Core facade. It owns the
+composition of `SkillStore`, `SkillDiscovery`, `DiscoverySession`, and
+`CapabilityMemory`; integrations cannot reach those component objects through the
+public API. Its public calls exchange dataclass/DTO values:
+
+- `begin_turn()` and `end_turn()` delimit per-turn Candidate Closure state;
+- `context_snapshot()` returns structured Bundle Cards, body states, pending
+  Candidate identity, and necessary turn status;
+- `search_capability()` returns a compact Candidate surface, search control, and
+  a separate retrieval trace;
+- `apply_capability()` accepts a structured `CapabilityDecision` and returns a
+  structured application/body result;
+- `load_skill_body()`, `mark_skill_body_evicted()`, and
+  `mark_all_skill_bodies_evicted()` own exact body lifecycle;
+- `turn_audit()` returns structured counters, sufficiency, transitions, and gaps.
+
+Core accepts no provider message or tool-call envelope and emits no system prompt,
+native tool schema, or model-specific JSON text. Integration adapters parse strict
+tool-argument JSON, serialize DTOs, inject prompts/context, and project history.
 
 ## Canonical entities
 
@@ -170,26 +193,39 @@ Cards, member body residency, eviction and metadata-first exact reload. It reads
 canonical records only through Skill Store. DIRECT activations may appear in the
 compatibility state/context surface, but never in maintained Bundle Cards.
 
+### Runtime — Skill Control Plane
+
+`runtime/control_plane.py` is the sole supported Integration-to-Core boundary. It
+delegates exact storage to Registry, one search to Discovery, turn state and
+eligibility to Discovery Session, and cross-turn Bundle/body state to Capability
+Memory. It does not expose those components or duplicate their mutable state.
+
 ### Integrations
 
 `integrations/reference_agent.py` supplies the current three native tools:
 `load_capability`, `apply_capability`, and `load_skill_body`. It owns the provider
-loop, canonical history, context injection, tombstones and model-visible History
-Projection, while forwarding all three tools to Core. `ReferenceSkillAgent` is a
+loop, strict tool-argument parsing, DTO-to-JSON serialization, canonical history,
+context injection, tombstones and model-visible History Projection. It depends
+only on `SkillControlPlane` public methods. `ReferenceSkillAgent` is a
 reference/example integration; its historical `ExperimentalSkillAgent` alias is
 retained for experiment reproducibility and is not a Core state owner.
 
-`RuntimeCapabilityHarness` is a thin forwarding facade over `DiscoverySession`
-and `CapabilityMemory`; it does not duplicate their state.
+`RuntimeCapabilityHarness` is a deprecated historical compatibility adapter. It
+remains importable from its module for V0.x experiments, including old combined
+resolver-loader tests, but is absent from top-level exports and README examples.
+It is not used by `ReferenceSkillAgent`, and its combined `load_capability()` path
+does not exist on `SkillControlPlane`.
 
 ## Runtime sequence
 
 ```text
 new user turn
-  1. Integration asks Core to begin a Discovery Session.
-  2. Integration injects Bundle Cards and projected canonical history.
+  1. Integration calls SkillControlPlane.begin_turn().
+  2. Integration serializes context_snapshot() into its own prompt and injects
+     projected canonical history.
   3. Model follows Bundle-first Trigger.
-  4. If a gap exists, load_capability delegates one search to Discovery.
+  4. If a gap exists, load_capability delegates through SkillControlPlane to one
+     Discovery search.
   5. Discovery Session accumulates Candidates and derives SEARCH_MORE.
   6. Model either searches a distinct residual gap, reports UNSATISFIED, or calls
      apply_capability with coverage and remaining gaps.
@@ -208,7 +244,7 @@ organization are expressed through the same model's native calls and Core valida
 Classification used for the V1 cleanup:
 
 - **KEEP**: `registry/{loader,store}.py`, `discovery/**`,
-  `runtime/{discovery_session,capability_memory,capability_harness}.py`,
+  `runtime/{control_plane,discovery_session,capability_memory}.py`,
   `integrations/**`, current corpus helpers, CLI, tests and fixtures.
 - **MERGE**: registry-owned Retrieval Card/index preparation moved into Discovery;
   Harness pending/search/sufficiency moved into Discovery Session; Harness Bundle
@@ -216,8 +252,9 @@ Classification used for the V1 cleanup:
   logic moved into the reference Integration.
 - **EVAL-ONLY**: `skill_control_plane/evals/**`, top-level `evals/**`, `scripts/**`
   and experiment fixtures/artifacts.
-- **LEGACY**: `skill_control_plane/evals/legacy/**`, `skill_control_plane/evolution/**`,
-  archived V0.x architecture documents and historical handoffs.
+- **LEGACY**: `runtime/capability_harness.py`,
+  `skill_control_plane/evals/legacy/**`, `skill_control_plane/evolution/**`, archived
+  V0.x architecture documents and historical handoffs.
 - **DELETE-CANDIDATE**: none. Uncertain historical material was retained and labeled
   rather than deleted.
 

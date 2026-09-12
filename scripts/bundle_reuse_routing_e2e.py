@@ -71,11 +71,12 @@ class HiddenBundleAgent(ExperimentalSkillAgent):
 
 def clone_agent(source, client, *, hidden=False):
     harness = RuntimeCapabilityHarness(
-        discovery=source.harness.discovery,
-        state=deepcopy(source.harness.state),
+        discovery=source._experiment_harness.discovery,
+        state=deepcopy(source._experiment_harness.state),
     )
     agent_type = HiddenBundleAgent if hidden else ExperimentalSkillAgent
-    agent = agent_type(harness, client, max_steps=8)
+    agent = agent_type(harness.control_plane, client, max_steps=8)
+    agent._experiment_harness = harness
     agent.history = deepcopy(source.history)
     agent._history_skill_ids = set(source._history_skill_ids)
     return agent
@@ -152,13 +153,15 @@ def main():
         discovery = SkillDiscovery(registry, retrieval_cards=cards)
         glm = BigModelChatClient(timeout=60, max_tokens=4096)
         client = RecordingClient(glm)
+        bootstrap_harness = RuntimeCapabilityHarness(discovery=discovery)
         bootstrap = ExperimentalSkillAgent(
-            RuntimeCapabilityHarness(discovery=discovery), client, max_steps=8)
+            bootstrap_harness.control_plane, client, max_steps=8)
+        bootstrap._experiment_harness = bootstrap_harness
         report['model'] = glm.model
         report['bootstrap'] = run_turn(
             bootstrap, client, 'bootstrap', BOOTSTRAP)
         powerpoint_bundles = [
-            bundle for bundle in bootstrap.harness.state.active_bundles
+            bundle for bundle in bootstrap_harness.state.active_bundles
             if bundle.skill_ids == ('powerpoint',)
         ]
         if not powerpoint_bundles:
@@ -177,7 +180,7 @@ def main():
         ]
 
         evicted = clone_agent(bootstrap, client)
-        evicted.harness.mark_skill_body_evicted('powerpoint')
+        evicted.control_plane.mark_skill_body_evicted('powerpoint')
         report['evicted'] = run_turn(evicted, client, 'evicted', EVICTED)
 
         gap = clone_agent(bootstrap, client)

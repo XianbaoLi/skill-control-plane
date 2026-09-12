@@ -133,7 +133,7 @@ def test_second_empty_search_counts_as_repeated_no_progress():
 
 def test_agent_turn_audit_reports_partial_and_resets_budget_next_turn():
     runtime = harness()
-    agent = ExperimentalSkillAgent(runtime, Client([
+    agent = ExperimentalSkillAgent(runtime.control_plane, Client([
         native('load_capability', {'need': 'OCR'}),
         native('apply_capability', decision(
             ('ocr',), remaining_gaps=('quantum teleporter',))),
@@ -155,7 +155,7 @@ def test_agent_turn_audit_reports_partial_and_resets_budget_next_turn():
 
 def test_missing_skill_stops_without_apply_and_is_inferred_unsatisfied():
     runtime = harness()
-    agent = ExperimentalSkillAgent(runtime, Client([
+    agent = ExperimentalSkillAgent(runtime.control_plane, Client([
         native('load_capability', {'need': 'quantum teleporter control'}),
         {'role': 'assistant', 'content': 'No credible Skill; gap unresolved.'},
     ]))
@@ -169,7 +169,7 @@ def test_missing_skill_stops_without_apply_and_is_inferred_unsatisfied():
 
 def test_multi_gap_search_more_is_inferred_before_first_apply():
     runtime = harness()
-    agent = ExperimentalSkillAgent(runtime, Client([
+    agent = ExperimentalSkillAgent(runtime.control_plane, Client([
         native('load_capability', {'need': 'OCR'}),
         native('load_capability', {'need': 'presentation slides'}),
         native('apply_capability', decision(('ocr', 'powerpoint'))),
@@ -184,7 +184,7 @@ def test_multi_gap_search_more_is_inferred_before_first_apply():
 
 def test_final_outcome_uses_last_successful_discovery_behavior():
     runtime = harness()
-    agent = ExperimentalSkillAgent(runtime, Client([
+    agent = ExperimentalSkillAgent(runtime.control_plane, Client([
         native('load_capability', {'need': 'OCR'}),
         native('apply_capability', decision(('ocr',))),
         native('load_capability', {'need': 'quantum teleporter control'}),

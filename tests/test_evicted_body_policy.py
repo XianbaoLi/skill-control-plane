@@ -35,7 +35,7 @@ def experiment_module():
 
 
 def test_default_policy_allows_metadata_reuse_without_relying_on_old_body():
-    system = ExperimentalSkillAgent(harness(), Client()).render_system_context()
+    system = ExperimentalSkillAgent(harness().control_plane, Client()).render_system_context()
     normalized = ' '.join(system.split())
     assert 'An evicted body is unavailable' in normalized
     assert 'never rely on it' in normalized
@@ -48,9 +48,9 @@ def test_default_policy_allows_metadata_reuse_without_relying_on_old_body():
 
 
 def test_old_baseline_changes_only_body_policy_instruction():
-    new = ExperimentalSkillAgent(harness(), Client())
+    new = ExperimentalSkillAgent(harness().control_plane, Client())
     old = ExperimentalSkillAgent(
-        harness(), Client(), require_evicted_body_reload=True)
+        harness().control_plane, Client(), require_evicted_body_reload=True)
     new_system = new.render_system_context()
     old_system = old.render_system_context()
     assert 'mandatory-reload baseline' in old_system
@@ -59,11 +59,11 @@ def test_old_baseline_changes_only_body_policy_instruction():
     new_tail = new_system.split('Authoritative evicted Bundle Skill IDs:', 1)[1]
     old_tail = old_system.split('Authoritative evicted Bundle Skill IDs:', 1)[1]
     assert new_tail == old_tail
-    assert new.harness.state == old.harness.state
+    assert new.control_plane.context_snapshot() == old.control_plane.context_snapshot()
 
 
 def test_evicted_no_tool_is_metadata_reuse_not_missing_reload():
-    agent = ExperimentalSkillAgent(harness(), Client())
+    agent = ExperimentalSkillAgent(harness().control_plane, Client())
     assert agent.run('adjust the title') == 'done'
     assert agent.turn_audit['bundle_reuse_outcome'] == 'bundle_metadata_reuse'
     assert agent.turn_audit['bundle_member_body_state_after'] == {
@@ -81,7 +81,9 @@ def test_experiment_has_balanced_simple_and_detailed_cases():
                             policy='old_mandatory')
     new = module.make_agent(discovery=harness().discovery, client=Client(),
                             policy='new_metadata_first')
-    assert old.harness.state == new.harness.state == module.frozen_state()
+    assert old.control_plane.context_snapshot() == new.control_plane.context_snapshot()
+    assert old.control_plane.context_snapshot().skill_body_states == \
+        module.frozen_state().skill_body_states
     assert old.history == new.history == list(module.COMPRESSED_HISTORY)
     assert old.require_evicted_body_reload
     assert not new.require_evicted_body_reload

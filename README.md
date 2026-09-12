@@ -24,8 +24,13 @@ runtime/capability_memory ─────────────────→
   no-progress/repeated-query handling, sufficiency and candidate eligibility.
 - `runtime/capability_memory`: cross-turn Bundles, Bundle Cards and resident or
   evicted Skill Body state.
-- `integrations`: native tool schemas and loop, Bundle/context injection, and
-  canonical-to-model-visible History Projection.
+- `integrations`: native tool schemas and loop, structured-context injection,
+  JSON serialization, and canonical-to-model-visible History Projection.
+
+`SkillControlPlane` is the only supported Agent-facing entry point. It composes
+the Store, Discovery, Discovery Session, and Capability Memory behind structured
+dataclass inputs and outputs; Core does not build prompts, tool schemas, provider
+messages, or tool-call JSON.
 
 `evals` is a sidecar validation system and is not part of the production runtime
 chain. Historical V0.x implementations live under `skill_control_plane.evals.legacy`.
@@ -56,18 +61,25 @@ python -m pip install -e ".[dev]"
 pytest -q
 ```
 
-Minimal Core construction:
+Minimal supported construction:
 
 ```python
 from skill_control_plane import (
-    CapabilityMemory, DiscoverySession, SkillDiscovery, SkillStore,
+    SkillControlPlane, SkillDiscovery, SkillStore,
 )
 
 store = SkillStore.from_tree("/path/to/skills")
 discovery = SkillDiscovery(store)
-memory = CapabilityMemory(store)
-session = DiscoverySession(discovery, memory)
+control_plane = SkillControlPlane(store, discovery=discovery)
+
+control_plane.begin_turn()
+snapshot = control_plane.context_snapshot()
 ```
+
+`RuntimeCapabilityHarness` remains importable only from
+`skill_control_plane.runtime.capability_harness` for historical experiments. It
+is deprecated, retains the old combined resolver loader where needed, and is not
+used by the Reference Agent or exported as public API.
 
 Corpus and evaluation commands are available through `skill-control-plane --help`.
 

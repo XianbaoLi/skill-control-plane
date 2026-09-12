@@ -76,8 +76,10 @@ class RecordingClient:
 
 
 def make_agent(discovery, client, *, policy):
+    harness = RuntimeCapabilityHarness(
+        discovery=discovery, state=deepcopy(frozen_state()))
     agent = ExperimentalSkillAgent(
-        RuntimeCapabilityHarness(discovery=discovery, state=deepcopy(frozen_state())),
+        harness.control_plane,
         client,
         max_steps=8,
         require_evicted_body_reload=(policy == 'old_mandatory'),

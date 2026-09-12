@@ -57,7 +57,8 @@ def audit_multi_search(agent):
     checks = {'two_successful_searches': len(searches) == 2,
               'one_successful_apply': len(applications) == 1,
               'no_protocol_or_tool_errors': not any(r.get('error') or r.get('tool_error') for r in agent.trace),
-              'pool_empty_at_end': agent.harness.pending_candidates is None}
+              'pool_empty_at_end': not agent.control_plane.context_snapshot(
+              ).pending_candidate_skill_ids}
     if len(searches) == 2 and len(applications) == 1:
         first, second = [{c['skill_id'] for c in e['result']['candidates']} for e in searches]
         application = applications[0]
@@ -201,7 +202,8 @@ def main():
                 records, model_name=embedding.model, dimensions=embedding.dimensions,
                 embed_batch=embedding), retrieval_cards=cards)
         harness = RuntimeCapabilityHarness(discovery=discovery)
-        agent = ExperimentalSkillAgent(harness, RecordingClient(chat), max_steps=args.max_steps)
+        agent = ExperimentalSkillAgent(
+            harness.control_plane, RecordingClient(chat), max_steps=args.max_steps)
         report['final'] = agent.run(args.task)
         # Acceptance measures observed actions; it does not prescribe model decisions.
         search_steps = [r for r in agent.trace if any(

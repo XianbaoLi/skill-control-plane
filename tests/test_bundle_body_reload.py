@@ -189,7 +189,7 @@ def test_same_agent_second_turn_exact_reload_has_zero_retrieval(harness, monkeyp
 
     monkeypatch.setattr(harness.discovery, 'discover_skills', count_retrieval)
     monkeypatch.setattr(harness.discovery.registry, 'load_skill_body', count_body)
-    agent = ExperimentalSkillAgent(harness, client)
+    agent = ExperimentalSkillAgent(harness.control_plane, client)
     assert agent.run('读取这个文档并做成 PPT') == 'PPT created.'
     bundle_before = deepcopy(harness.state.active_bundles)
     assert harness.state.skill_body_states == {'powerpoint': 'resident'}

@@ -31,10 +31,8 @@ def make_agent(*, powerpoint='resident', pdf='resident'):
     state = RuntimeCapabilityState([
         ActiveBundle('documents', 'Document work', ('powerpoint', 'pdf')),
     ], skill_body_states={'powerpoint': powerpoint, 'pdf': pdf})
-    return ExperimentalSkillAgent(
-        RuntimeCapabilityHarness(discovery=SkillDiscovery(registry), state=state),
-        NoCallClient(),
-    )
+    harness = RuntimeCapabilityHarness(discovery=SkillDiscovery(registry), state=state)
+    return ExperimentalSkillAgent(harness.control_plane, NoCallClient())
 
 
 def paired_apply_history():
@@ -123,16 +121,16 @@ def test_exact_reload_becomes_visible_after_residency_transition():
     agent = make_agent(powerpoint='evicted')
     agent.history = paired_apply_history()
     assert POWERPOINT_BODY not in json.dumps(agent.build_model_history())
-    result = agent.harness.load_skill_body('powerpoint')
+    result = agent.control_plane.load_skill_body('powerpoint')
     agent.history.extend(paired_reload_history())
     projected = agent.build_model_history()
-    assert result['body'] == POWERPOINT_BODY
+    assert result.body == POWERPOINT_BODY
     assert tool_payload(projected, 'apply-1')['skill_bodies'][0] == {
         'skill_id': 'powerpoint', 'body_state': 'superseded',
         'body': SUPERSEDED_BODY_TOMBSTONE,
     }
     assert tool_payload(projected, 'reload-1')['body'] == POWERPOINT_BODY
-    assert agent.harness.state.skill_body_states['powerpoint'] == 'resident'
+    assert agent.control_plane.context_snapshot().skill_body_states['powerpoint'] == 'resident'
     assert agent._last_history_projection['model_visible_body_ids'] == [
         'pdf', 'powerpoint']
     assert agent._last_history_projection['redacted_body_ids'] == ['powerpoint']
@@ -141,13 +139,13 @@ def test_exact_reload_becomes_visible_after_residency_transition():
 def test_three_occurrences_leave_only_latest_reload_visible_and_keep_pairing():
     agent = make_agent()
     agent.history = paired_apply_history()
-    agent.harness.mark_skill_body_evicted('powerpoint')
-    first = agent.harness.load_skill_body('powerpoint')
-    assert first['status'] == 'loaded'
+    agent.control_plane.mark_skill_body_evicted('powerpoint')
+    first = agent.control_plane.load_skill_body('powerpoint')
+    assert first.status == 'loaded'
     agent.history.extend(paired_reload_history('reload-1'))
-    agent.harness.mark_skill_body_evicted('powerpoint')
-    second = agent.harness.load_skill_body('powerpoint')
-    assert second['status'] == 'loaded'
+    agent.control_plane.mark_skill_body_evicted('powerpoint')
+    second = agent.control_plane.load_skill_body('powerpoint')
+    assert second.status == 'loaded'
     agent.history.extend(paired_reload_history('reload-2'))
 
     canonical = deepcopy(agent.history)
@@ -167,8 +165,8 @@ def test_multi_skill_reloads_keep_each_skills_latest_body_visible_once():
     agent = make_agent()
     agent.history = paired_apply_history()
     for call_id in ('reload-1', 'reload-2'):
-        agent.harness.mark_skill_body_evicted('powerpoint')
-        assert agent.harness.load_skill_body('powerpoint')['status'] == 'loaded'
+        agent.control_plane.mark_skill_body_evicted('powerpoint')
+        assert agent.control_plane.load_skill_body('powerpoint').status == 'loaded'
         agent.history.extend(paired_reload_history(call_id))
 
     canonical = deepcopy(agent.history)
@@ -190,7 +188,7 @@ def test_multi_skill_reloads_keep_each_skills_latest_body_visible_once():
 def test_repeated_eviction_redacts_every_historical_body_version():
     agent = make_agent()
     agent.history = [*paired_apply_history(), *paired_reload_history()]
-    agent.harness.mark_skill_body_evicted('powerpoint')
+    agent.control_plane.mark_skill_body_evicted('powerpoint')
     canonical = deepcopy(agent.history)
     projected = agent.build_model_history()
     assert POWERPOINT_BODY not in json.dumps(projected)
@@ -226,14 +224,15 @@ def test_projection_fails_clearly_on_malformed_canonical_tool_json():
 
 def test_eviction_projection_does_not_change_runtime_or_pending_pool():
     agent = make_agent()
-    pending = agent.harness.search_capability('spreadsheet')
-    retrieval_count = agent.harness.retrieval_call_count
-    bundles = deepcopy(agent.harness.state.active_bundles)
+    pending = agent.control_plane.search_capability('spreadsheet')
+    retrieval_count = agent.control_plane.turn_audit().retrieval_call_count
     agent.history = paired_apply_history()
-    agent.harness.mark_skill_body_evicted('powerpoint')
+    agent.control_plane.mark_skill_body_evicted('powerpoint')
+    bundles = deepcopy(agent.control_plane.context_snapshot().maintained_bundles)
     agent.build_model_history()
-    assert agent.harness.state.active_bundles == bundles
-    assert agent.harness.pending_candidates is pending
-    assert agent.harness.retrieval_call_count == retrieval_count
-    assert agent.harness.body_load_count == 0
-    assert agent.harness.discovery.registry.load_skill_body('powerpoint') == POWERPOINT_BODY
+    snapshot = agent.control_plane.context_snapshot()
+    assert snapshot.maintained_bundles == bundles
+    assert snapshot.pending_candidate_skill_ids == tuple(
+        candidate.skill_id for candidate in pending.candidates)
+    assert agent.control_plane.turn_audit().retrieval_call_count == retrieval_count
+    assert agent.control_plane.turn_audit().body_load_count == 0
