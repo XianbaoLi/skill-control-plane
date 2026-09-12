@@ -28,7 +28,8 @@ def _result(**updates):
         "arm": "native", "corpus": "S32", "run_id": "r1", "task_success": True,
         "success_details": [], "required_skills": ["a"], "activated_skills": ["a"],
         "required_skill_recall": 1.0, "wrong_skill_count": 0, "discovery_count": 1,
-        "repeated_discovery_count": 0, "skill_body_load_count": 1,
+        "repeated_discovery_count": 0, "redundant_discovery_count": 0,
+        "duplicate_skill_activation_count": 0, "skill_body_load_count": 1,
         "reroute_success": None, "new_required_skill_recall": None,
         "premature_activation_count": 0, "bundle_create_count": None,
         "bundle_extend_count": None, "bundle_reuse_count": None,
@@ -285,15 +286,51 @@ def test_paired_metrics_exclude_control_plane_only_diagnostics():
     native = _result()
     control = _result(arm="control-plane", run_id="r2", task_success=False,
                       bundle_create_count=1, bundle_extend_count=0, bundle_reuse_count=0,
+                      redundant_discovery_count=1, duplicate_skill_activation_count=1,
                       required_skill_recall=.5, wrong_skill_count=2, llm_input_tokens=15,
                       llm_output_tokens=3, llm_total_tokens=18, wall_time_ms=30,
                       control_plane_telemetry={"retrieval_calls": 1, "retrieval_events": []})
     delta = paired_report([native, control], "scaling")["paired_delta_control_plane_minus_native"][0]
     assert delta["task_success"] == -1 and delta["llm_total_tokens"] == 6
     assert not ({"bundle_create_count", "bundle_extend_count", "bundle_reuse_count",
+                 "redundant_discovery_count", "duplicate_skill_activation_count",
                  "retrieval_calls", "query_embedding_calls_total"} & set(delta))
 
 
 def test_mechanism_helpers():
     assert required_skill_recall(["a", "b"], ["b", "x"]) == .5
     assert repeated_discovery_count(["api", "db", "api", "api", "db"]) == 3
+
+
+def test_score_run_reports_capability_aware_redundancy(tmp_path):
+    task = next(t.raw for t in load_tasks(BENCH / "scaling.jsonl") if t.task_id == "SC-06")
+    trace = {
+        "arm": "control-plane",
+        "activated_skills": ["api-design"],
+        "discoveries": ["first phrasing", "second phrasing", "third phrasing"],
+        "skill_body_loads": ["api-design"],
+        "bundle_actions": ["CREATE"],
+        "bundle_action_requests": ["CREATE", "CREATE", "CREATE"],
+        "events": [
+            {"event_seq": 1, "type": "capability_search_result", "query": "first",
+             "skill_ids": ["api-design"], "active_skill_ids": []},
+            {"event_seq": 2, "type": "capability_apply_result",
+             "skill_ids": ["api-design"], "committed_skill_ids": ["api-design"],
+             "deduplicated_skill_ids": []},
+            {"event_seq": 3, "type": "capability_search_result", "query": "second",
+             "skill_ids": ["api-design"], "active_skill_ids": ["api-design"]},
+            {"event_seq": 4, "type": "capability_apply_result",
+             "skill_ids": ["api-design"], "committed_skill_ids": [],
+             "deduplicated_skill_ids": ["api-design"]},
+            {"event_seq": 5, "type": "capability_search_result", "query": "third",
+             "skill_ids": ["api-design"], "active_skill_ids": ["api-design"]},
+            {"event_seq": 6, "type": "capability_apply_result",
+             "skill_ids": ["api-design"], "committed_skill_ids": [],
+             "deduplicated_skill_ids": ["api-design"]},
+        ],
+    }
+    scored = score_run(dict(task, automatic_success_criteria=[]), trace, tmp_path)
+    assert scored["redundant_discovery_count"] == 2
+    assert scored["duplicate_skill_activation_count"] == 2
+    assert scored["bundle_create_count"] == 1
+    assert scored["skill_body_load_count"] == 1

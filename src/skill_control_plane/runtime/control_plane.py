@@ -58,6 +58,7 @@ class RetrievalTrace:
 class CapabilitySearchResult:
     query: str
     candidates: tuple[Candidate, ...]
+    active_skill_ids: tuple[str, ...]
     search_control: SearchControl
     retrieval_trace: RetrievalTrace
 
@@ -238,6 +239,7 @@ class SkillControlPlane:
         return CapabilitySearchResult(
             query=result.query,
             candidates=self._compact_candidates(result),
+            active_skill_ids=self._memory.active_skill_ids,
             search_control=control,
             retrieval_trace=RetrievalTrace(
                 query=result.query,

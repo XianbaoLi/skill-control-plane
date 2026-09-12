@@ -38,6 +38,10 @@ class SearchControl:
 @dataclass(frozen=True, slots=True)
 class CapabilityApplication:
     action: Literal["DIRECT", "EXTEND", "CREATE"]
+    requested_action: Literal["DIRECT", "EXTEND", "CREATE"]
+    effective_action: Literal["DIRECT", "EXTEND", "CREATE", "reuse"]
+    committed_skill_ids: tuple[str, ...]
+    deduplicated_skill_ids: tuple[str, ...]
     affected_bundle_id: str | None
     selected_skill_ids: tuple[str, ...]
     coverage: tuple[CoverageClaim, ...]
@@ -221,20 +225,55 @@ class DiscoverySession:
         if self.pending_candidates is None:
             raise ValueError("apply_capability requires a fresh load_capability result")
         decision = validate_decision(decision, self.pending_candidates, self.memory)
-        target, bodies = self.memory.commit(
-            action=decision.action,
-            skill_ids=decision.skill_ids,
-            target_bundle_id=decision.target_bundle_id,
-            purpose=decision.purpose,
-        )
-        result = CapabilityApplication(
-            action=decision.action,
-            affected_bundle_id=target,
-            selected_skill_ids=decision.skill_ids,
-            coverage=decision.coverage,
-            remaining_gaps=decision.remaining_gaps,
-            skill_bodies=bodies,
-        )
+        active_skill_ids = set(self.memory.active_skill_ids)
+        deduplicated_skill_ids = tuple(
+            skill_id for skill_id in decision.skill_ids
+            if skill_id in active_skill_ids
+        ) if decision.action in {"CREATE", "EXTEND"} else ()
+        committed_skill_ids = tuple(
+            skill_id for skill_id in decision.skill_ids
+            if skill_id not in active_skill_ids
+        ) if decision.action in {"CREATE", "EXTEND"} else decision.skill_ids
+
+        if decision.action in {"CREATE", "EXTEND"} and not committed_skill_ids:
+            memberships = [
+                bundle for bundle in self.memory.state.active_bundles
+                if set(decision.skill_ids) <= set(bundle.skill_ids)
+            ]
+            if not memberships:
+                raise ValueError("active capability membership is inconsistent")
+            target = decision.target_bundle_id or memberships[0].bundle_id
+            result = CapabilityApplication(
+                action=decision.action,
+                requested_action=decision.action,
+                effective_action="reuse",
+                committed_skill_ids=(),
+                deduplicated_skill_ids=deduplicated_skill_ids,
+                affected_bundle_id=target,
+                selected_skill_ids=decision.skill_ids,
+                coverage=decision.coverage,
+                remaining_gaps=decision.remaining_gaps,
+                skill_bodies=(),
+            )
+        else:
+            target, bodies = self.memory.commit(
+                action=decision.action,
+                skill_ids=committed_skill_ids,
+                target_bundle_id=decision.target_bundle_id,
+                purpose=decision.purpose,
+            )
+            result = CapabilityApplication(
+                action=decision.action,
+                requested_action=decision.action,
+                effective_action=decision.action,
+                committed_skill_ids=committed_skill_ids,
+                deduplicated_skill_ids=deduplicated_skill_ids,
+                affected_bundle_id=target,
+                selected_skill_ids=decision.skill_ids,
+                coverage=decision.coverage,
+                remaining_gaps=decision.remaining_gaps,
+                skill_bodies=bodies,
+            )
         self.pending_candidates = None
         self.apply_count += 1
         outcome = "UNSATISFIED" if decision.remaining_gaps else "COVERED"

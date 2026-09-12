@@ -32,13 +32,15 @@ export function formatRuntimePolicy(snapshot: ContextSnapshot): string {
     "- You can discover capabilities on demand with load_capability.",
     "- Use the existing Bundle Cards below first to decide whether current capabilities are enough.",
     cards ? `Bundle Cards:\n${cards}` : "Bundle Cards: none",
-    "- If a capability is missing, call load_capability with a concise need.",
+    "- Skills listed in Bundle Cards are already active; reuse them first.",
+    "- Do not search for or re-create an already active capability.",
+    "- Do not repeat the same capability search with different phrasing.",
+    "- If a capability is missing from the Bundle Cards, call load_capability with a concise need.",
     "- After searching, you must call apply_capability for the selected Skill IDs.",
     "- CREATE and EXTEND are the default maintained actions.",
     "- DIRECT is only for clearly one-off or short-term capability use, and must target an existing Bundle ID.",
     "- DIRECT members remain metadata in the direct Bundle.",
     "- If a Skill body was evicted, call load_skill_body(skill_id) when needed.",
-    "- Do not repeat an identical capability search.",
     `- Remaining load_capability search budget for this turn: ${budget}.`,
   ].join("\n");
 }

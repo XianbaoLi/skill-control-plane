@@ -63,5 +63,8 @@ test("runtime policy includes bundle cards and DIRECT rules", () => {
   assert.match(text, /skill-evicted/);
   assert.match(text, /DIRECT/);
   assert.match(text, /apply_capability/);
+  assert.match(text, /already active/);
+  assert.match(text, /reuse them first/);
+  assert.match(text, /different phrasing/);
   assert.match(text, /Remaining load_capability search budget for this turn: 2/);
 });

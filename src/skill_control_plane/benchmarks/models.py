@@ -13,6 +13,7 @@ SUITES = {"scaling", "runtime"}
 RUNTIME_KINDS = {"single-skill", "multi-skill", "dynamic-reroute", "reuse-session"}
 NONNEGATIVE_FIELDS = (
     "wrong_skill_count", "discovery_count", "repeated_discovery_count",
+    "redundant_discovery_count", "duplicate_skill_activation_count",
     "skill_body_load_count", "llm_input_tokens", "llm_output_tokens",
     "llm_total_tokens", "query_embedding_calls_startup",
     "query_embedding_calls_runtime", "query_embedding_calls_total", "wall_time_ms",
@@ -97,6 +98,7 @@ def validate_result(row: dict[str, Any]) -> BenchmarkResult:
         "task_success", "success_details", "required_skills", "activated_skills",
         "required_skill_recall", "wrong_skill_count", "discovery_count",
         "repeated_discovery_count", "skill_body_load_count", "reroute_success",
+        "redundant_discovery_count", "duplicate_skill_activation_count",
         "new_required_skill_recall", "premature_activation_count",
         "bundle_create_count", "bundle_extend_count", "bundle_reuse_count",
         "session_restore_success", "llm_input_tokens", "llm_output_tokens",

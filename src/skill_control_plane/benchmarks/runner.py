@@ -148,9 +148,15 @@ def run_one(*, task: dict[str, Any], arm: str, corpus: str, model: str,
     assert_gold_isolated(task, fixture_spec, trace)
     trace["arm"] = arm
     scored = score_run(task, trace, work, verifier)
+    smoke_trace = {
+        **(trace.get("smoke_trace") or {}),
+        "redundant_discovery_count": scored["redundant_discovery_count"],
+        "duplicate_skill_activation_count": scored["duplicate_skill_activation_count"],
+    }
     usage = trace.get("usage", {})
     row = {"benchmark_version": VERSION, "task_id": task["task_id"], "suite": task["suite"],
            "arm": arm, "corpus": corpus, "model": model, "run_id": run_id, **scored,
+           "smoke_trace": smoke_trace,
            "llm_input_tokens": int(usage.get("input", 0)),
            "llm_output_tokens": int(usage.get("output", 0)),
            "llm_total_tokens": int(usage.get("input", 0)) + int(usage.get("output", 0)),

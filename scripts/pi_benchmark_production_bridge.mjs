@@ -131,6 +131,11 @@ let currentTurn = null;
 const maxTurns = Number(process.env.BENCHMARK_MAX_TURNS || 20);
 const reasoning = process.env.BENCHMARK_REASONING || undefined;
 const record = event => events.push({ event_seq: ++eventSeq, turn_id: currentTurn, ...event });
+const resultPayload = value => {
+  if (value && typeof value === 'object') return value;
+  if (typeof value !== 'string') return null;
+  try { return JSON.parse(value); } catch { return null; }
+};
 const subscribe = session => session.subscribe(event => {
   if (event.type === 'tool_execution_start') {
     record({ type: 'tool_call', tool: event.toolName, args: event.args });
@@ -138,8 +143,8 @@ const subscribe = session => session.subscribe(event => {
       record({ type: 'capability_search', query: event.args?.need });
     }
     if (event.toolName === 'apply_capability') {
-      record({ type: 'capability_activation', skill_ids: event.args?.skill_ids ?? [],
-        action: event.args?.action });
+      record({ type: 'capability_apply_request', skill_ids: event.args?.skill_ids ?? [],
+        requested_action: event.args?.action });
     }
     if (event.toolName === 'read' && String(event.args?.path).includes('/skills/')) {
       record({ type: 'capability_activation',
@@ -148,7 +153,39 @@ const subscribe = session => session.subscribe(event => {
   }
   if (event.type === 'tool_execution_end') {
     record({ type: 'tool_result', tool: event.toolName, is_error: event.isError });
-    const rendered = JSON.stringify(event.result);
+  }
+  if (event.type === 'message_end' && event.message.role === 'toolResult') {
+    const toolName = event.message.toolName;
+    const resultText = event.message.content?.find?.(
+      content => content?.type === 'text')?.text;
+    const result = resultPayload(resultText);
+    if (toolName === 'load_capability' && result) {
+      record({ type: 'capability_search_result', query: result.query,
+        skill_ids: (result.candidates ?? []).map(candidate => candidate.skill_id),
+        active_skill_ids: result.active_skill_ids ?? [] });
+    }
+    if (toolName === 'apply_capability' && result) {
+      record({ type: 'capability_apply_result',
+        skill_ids: result.selected_skill_ids ?? result.committed_skill_ids ?? [],
+        requested_action: result.requested_action,
+        effective_action: result.effective_action,
+        committed_skill_ids: result.committed_skill_ids ?? [],
+        deduplicated_skill_ids: result.deduplicated_skill_ids ?? [] });
+      for (const skill_id of [...(result.committed_skill_ids ?? []),
+        ...(result.deduplicated_skill_ids ?? [])]) {
+        record({ type: 'capability_activation', skill_ids: [skill_id],
+          action: result.effective_action, requested_action: result.requested_action });
+      }
+      for (const body of result.skill_bodies ?? []) {
+        record({ type: 'skill_body_load', skill_id: body.skill_id,
+          source: 'apply_capability', status: 'loaded' });
+      }
+    }
+    if (toolName === 'load_skill_body' && result?.status === 'loaded') {
+      record({ type: 'skill_body_load', skill_id: result.skill_id,
+        source: 'load_skill_body', status: 'loaded' });
+    }
+    const rendered = resultText ?? '';
     for (const match of rendered.matchAll(/BENCHMARK_EVIDENCE:([A-Za-z0-9_-]+)/g)) {
       record({ type: 'evidence_emitted', event_id: match[1], marker: match[0] });
     }
@@ -249,15 +286,17 @@ await stop(session);
 
 const toolCalls = events.filter(event => event.type === 'tool_call');
 const activations = events.filter(event => event.type === 'capability_activation');
-const applies = toolCalls.filter(event => event.tool === 'apply_capability');
+const applyRequests = events.filter(event => event.type === 'capability_apply_request');
+const applyResults = events.filter(event => event.type === 'capability_apply_result');
+const searchResults = events.filter(event => event.type === 'capability_search_result');
 const searches = toolCalls.filter(event => event.tool === 'load_capability');
-const explicitBodyLoads = toolCalls.filter(event => event.tool === 'load_skill_body');
 const nativeBodyLoads = toolCalls.filter(event => event.tool === 'read' &&
   String(event.args?.path).includes('/skills/'));
+const effectiveBodyLoads = events.filter(event => event.type === 'skill_body_load')
+  .map(event => ({ event, skill_id: event.skill_id }));
 const bodyLoads = arm === 'native'
   ? nativeBodyLoads.map(event => ({ ...event, skill_id: path.basename(path.dirname(event.args.path)) }))
-  : [...applies.flatMap(event => (event.args?.skill_ids ?? []).map(skill_id => ({ ...event, skill_id }))),
-     ...explicitBodyLoads.map(event => ({ ...event, skill_id: event.args?.skill_id }))];
+  : effectiveBodyLoads;
 const usage = messages.reduce((sum, row) => ({
   input: sum.input + (row.message.usage?.input ?? 0),
   output: sum.output + (row.message.usage?.output ?? 0),
@@ -280,8 +319,12 @@ const trace = {
   activated_skills: [...new Set(activations.flatMap(event => event.skill_ids))],
   discoveries: searches.map(event => event.args?.need),
   skill_body_loads: bodyLoads.map(event => event.skill_id),
-  bundle_actions: applies.map(event => event.args?.action),
-  bundle_reuse_count: turnMetrics.length > 1 && applies.length === 1 ? 1 : 0,
+  bundle_actions: applyResults
+    .filter(result => ['CREATE', 'EXTEND', 'DIRECT'].includes(result.effective_action))
+    .map(result => result.effective_action),
+  bundle_action_requests: applyRequests.map(event => event.requested_action),
+  bundle_reuse_count: applyResults.reduce(
+    (count, result) => count + (result.deduplicated_skill_ids?.length ?? 0), 0),
   session_restore_success: turns.length ? events.some(event => event.type === 'session_restored') : null,
   turn_metrics: turnMetrics.map(row => ({ ...row,
     discovery_count: searches.filter(event => event.turn_id === row.turn_id).length,
@@ -295,8 +338,19 @@ const trace = {
   query_embedding_calls_startup: embeddingRows.filter(row => row.phase === 'startup').length,
   query_embedding_calls_runtime: embeddingRows.filter(row => row.phase === 'runtime').length,
   control_plane_telemetry: arm === 'control-plane'
-    ? { retrieval_calls: searches.length, retrieval_events: [] }
+    ? { retrieval_calls: searches.length, retrieval_events: searchResults.map(event => ({
+        event_seq: event.event_seq, query: event.query, skill_ids: event.skill_ids,
+        active_skill_ids: event.active_skill_ids })) }
     : { retrieval_calls: null, retrieval_events: null },
+  smoke_trace: {
+    discoveries: searches.map(event => event.args?.need),
+    activated_skills: [...new Set(activations.flatMap(event => event.skill_ids))],
+    bundle_action_requests: applyRequests.map(event => event.requested_action),
+    bundle_actions: applyResults
+      .filter(result => ['CREATE', 'EXTEND', 'DIRECT'].includes(result.effective_action))
+      .map(result => result.effective_action),
+    skill_body_loads: bodyLoads.map(event => event.skill_id),
+  },
   system_context_projection: { source: 'Pi resource loader; benchmark gold is host-only' },
   tool_descriptions: arm === 'native'
     ? ['Read files', 'Write files', 'Edit files', 'Run shell commands']

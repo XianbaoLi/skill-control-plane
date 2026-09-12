@@ -10,6 +10,10 @@ PAIRED_METRICS = ("task_success", "required_skill_recall", "wrong_skill_count",
                   "cached_tokens", "wall_time_ms", "total_tool_calls")
 RUNTIME_ONLY_PAIRED_METRICS = ("reroute_success", "new_required_skill_recall",
                                "premature_activation_count")
+DIAGNOSTIC_METRICS = ("redundant_discovery_count",
+                      "duplicate_skill_activation_count",
+                      "bundle_create_count", "bundle_extend_count",
+                      "bundle_reuse_count")
 
 
 def _avg(rows: list[dict[str, Any]], metric: str) -> float | None:
@@ -19,6 +23,7 @@ def _avg(rows: list[dict[str, Any]], metric: str) -> float | None:
 
 def paired_report(rows: list[dict[str, Any]], suite: str) -> dict[str, Any]:
     metrics = PAIRED_METRICS if suite == "scaling" else PAIRED_METRICS + RUNTIME_ONLY_PAIRED_METRICS
+    summary_metrics = metrics + DIAGNOSTIC_METRICS
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         if row["suite"] == suite:
@@ -26,7 +31,7 @@ def paired_report(rows: list[dict[str, Any]], suite: str) -> dict[str, Any]:
     summary = []
     for (corpus, arm), group in sorted(grouped.items()):
         summary.append({"corpus": corpus, "arm": arm, "run_count": len(group),
-                        **{metric: _avg(group, metric) for metric in metrics}})
+                        **{metric: _avg(group, metric) for metric in summary_metrics}})
     paired = []
     by_pair: dict[tuple[str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
     for row in rows:

@@ -90,6 +90,21 @@ test("before_agent_start injects compact cards, policy and budget", async () => 
   assert.match(message.content[0].text, /Remaining load_capability search budget for this turn: 1/);
 });
 
+test("intermediate Pi turns do not clear pending candidates", async () => {
+  const sidecar = new RecordingSidecar();
+  const { adapter, pi } = createAdapter(sidecar);
+  const ctx = new FakeContext();
+  await adapter.handleSessionStart(ctx);
+  await pi.emit("turn_start", {}, ctx);
+  assert.equal(sidecar.calls.some((call) => call.method === "begin_turn"), false);
+  await pi.emit("agent_start", {}, ctx);
+  assert.equal(sidecar.calls.some((call) => call.method === "begin_turn"), true);
+  await pi.emit("turn_end", {}, ctx);
+  assert.equal(sidecar.calls.some((call) => call.method === "end_turn"), false);
+  await pi.emit("agent_end", { messages: [] }, ctx);
+  assert.equal(sidecar.calls.some((call) => call.method === "end_turn"), true);
+});
+
 test("restores latest valid custom state and appends state after apply", async () => {
   const sidecar = new RecordingSidecar();
   const { adapter, pi } = createAdapter(sidecar);

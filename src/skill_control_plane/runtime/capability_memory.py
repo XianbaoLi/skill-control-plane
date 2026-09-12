@@ -168,11 +168,15 @@ def validate_state(state: RuntimeCapabilityState, store: SkillStore) -> None:
     if not state.direct_skills <= known:
         raise ValueError("unknown direct skill")
     bundle_skills: set[str] = set()
+    all_member_skills: set[str] = set()
     for bundle in state.active_bundles:
         if not bundle.bundle_id.strip() or not bundle.purpose.strip() or not bundle.skill_ids:
             raise ValueError("active bundle requires id, purpose and skills")
         if len(bundle.skill_ids) != len(set(bundle.skill_ids)) or set(bundle.skill_ids) - known:
             raise ValueError("unknown or duplicate active bundle skill")
+        if all_member_skills & set(bundle.skill_ids):
+            raise ValueError("duplicate active Bundle member")
+        all_member_skills.update(bundle.skill_ids)
         roles = state.bundle_member_roles.get(bundle.bundle_id)
         if roles is None or set(roles) != set(bundle.skill_ids):
             raise ValueError("member role must exist exactly for Bundle members")
@@ -308,6 +312,13 @@ class CapabilityMemory:
             ids.update(bundle.skill_ids)
         return tuple(sorted(ids))
 
+    @property
+    def active_skill_ids(self) -> tuple[str, ...]:
+        return tuple(sorted({
+            skill_id for bundle in self.state.active_bundles
+            for skill_id in bundle.skill_ids
+        }))
+
     @staticmethod
     def _clean_phrase(raw: str, *, max_chars: int) -> str:
         phrase = " ".join(raw.split()).strip()
@@ -418,6 +429,15 @@ class CapabilityMemory:
     ) -> tuple[str | None, tuple[SkillBody, ...]]:
         for skill_id in skill_ids:
             self.store.get(skill_id)
+        if action in {"CREATE", "EXTEND"}:
+            active_skill_ids = {
+                bundle_skill_id for bundle in self.state.active_bundles
+                for bundle_skill_id in bundle.skill_ids
+            }
+            skill_ids = tuple(
+                skill_id for skill_id in skill_ids
+                if skill_id not in active_skill_ids
+            )
         active = list(self.state.active_bundles)
         roles = {
             bundle_id: dict(member_roles)

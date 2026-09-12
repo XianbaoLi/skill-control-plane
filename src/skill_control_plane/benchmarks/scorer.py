@@ -15,8 +15,56 @@ def required_skill_recall(required: list[str], activated: list[str]) -> float:
 
 
 def repeated_discovery_count(discoveries: list[str]) -> int:
+    """Return the legacy query-text metric; prefer capability-aware metrics."""
+
     counts = Counter(discoveries)
     return sum(count - 1 for count in counts.values() if count > 1)
+
+
+def duplicate_skill_activation_count(events: list[dict[str, Any]]) -> int:
+    """Count activation attempts after a Skill's first legal activation."""
+
+    ordered = sorted(events, key=lambda event: event.get("event_seq", 0))
+    apply_events = [event for event in ordered
+                    if event.get("type") == "capability_apply_result" and
+                    (event.get("skill_ids") or event.get("committed_skill_ids"))]
+    if not apply_events:
+        apply_events = [event for event in ordered
+                        if event.get("type") == "capability_activation" and
+                        event.get("action") != "native-read"]
+    seen: set[str] = set()
+    duplicates = 0
+    for event in apply_events:
+        for skill_id in event.get("skill_ids", ()):
+            if skill_id in seen:
+                duplicates += 1
+            seen.add(skill_id)
+    return duplicates
+
+
+def redundant_discovery_count(events: list[dict[str, Any]]) -> int:
+    """Count searches that later apply a Skill already active at search time."""
+
+    ordered = sorted(events, key=lambda event: event.get("event_seq", 0))
+    search_states: list[tuple[int, set[str]]] = []
+    apply_events: list[tuple[int, set[str]]] = []
+    active: set[str] = set()
+    for event in ordered:
+        event_type = event.get("type")
+        if event_type == "capability_search_result":
+            search_states.append((event.get("event_seq", 0),
+                                  set(event.get("active_skill_ids", active))))
+        elif event_type == "capability_apply_result":
+            requested = event.get("skill_ids") or event.get("committed_skill_ids") or ()
+            apply_events.append((event.get("event_seq", 0), set(requested)))
+            active.update(event.get("committed_skill_ids", ()))
+
+    redundant = 0
+    for search_seq, active_at_search in search_states:
+        if any(search_seq < apply_seq and active_at_search & requested
+               for apply_seq, requested in apply_events):
+            redundant += 1
+    return redundant
 
 
 def _check(check: dict[str, Any], workspace: Path,
@@ -91,6 +139,7 @@ def score_run(task: dict[str, Any], trace: dict[str, Any], workspace: str | Path
                         "Pi session restore succeeded"))
     activated = list(dict.fromkeys(trace.get("activated_skills", [])))
     discoveries = trace.get("discoveries", [])
+    events = trace.get("events", [])
     required = task["required_skills"]
     reroute_ok = None
     new_recall = None
@@ -132,6 +181,8 @@ def score_run(task: dict[str, Any], trace: dict[str, Any], workspace: str | Path
         "wrong_skill_count": len(set(activated) - set(required)),
         "discovery_count": len(discoveries),
         "repeated_discovery_count": repeated_discovery_count(discoveries),
+        "redundant_discovery_count": redundant_discovery_count(events),
+        "duplicate_skill_activation_count": duplicate_skill_activation_count(events),
         "skill_body_load_count": len(trace.get("skill_body_loads", [])),
         "reroute_success": reroute_ok,
         "new_required_skill_recall": new_recall,

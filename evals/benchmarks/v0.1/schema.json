@@ -3,7 +3,7 @@
   "$id": "https://skill-control-plane.local/benchmarks/v0.1/result.schema.json",
   "title": "Skill benchmark v0.1 run result",
   "type": "object",
-  "required": ["benchmark_version","task_id","suite","arm","corpus","run_id","task_success","success_details","required_skills","activated_skills","required_skill_recall","wrong_skill_count","discovery_count","repeated_discovery_count","skill_body_load_count","reroute_success","new_required_skill_recall","premature_activation_count","bundle_create_count","bundle_extend_count","bundle_reuse_count","session_restore_success","llm_input_tokens","llm_output_tokens","llm_total_tokens","cached_tokens","query_embedding_calls_startup","query_embedding_calls_runtime","query_embedding_calls_total","wall_time_ms","total_tool_calls","control_plane_telemetry","pi_package","pi_version","provider","model","reasoning_config","temperature","max_turns","timeout_seconds","corpus_version","corpus_subset","retrieval_card_identity","dense_index_identity","adapter_commit_sha"],
+  "required": ["benchmark_version","task_id","suite","arm","corpus","run_id","task_success","success_details","required_skills","activated_skills","required_skill_recall","wrong_skill_count","discovery_count","repeated_discovery_count","redundant_discovery_count","duplicate_skill_activation_count","skill_body_load_count","reroute_success","new_required_skill_recall","premature_activation_count","bundle_create_count","bundle_extend_count","bundle_reuse_count","session_restore_success","llm_input_tokens","llm_output_tokens","llm_total_tokens","cached_tokens","query_embedding_calls_startup","query_embedding_calls_runtime","query_embedding_calls_total","wall_time_ms","total_tool_calls","control_plane_telemetry","pi_package","pi_version","provider","model","reasoning_config","temperature","max_turns","timeout_seconds","corpus_version","corpus_subset","retrieval_card_identity","dense_index_identity","adapter_commit_sha"],
   "properties": {
     "benchmark_version":{"const":"benchmark-v0.1"}, "suite":{"enum":["scaling","runtime"]},
     "arm":{"enum":["native","control-plane"]}, "corpus":{"enum":["S32","S64","S128"]},
@@ -11,6 +11,7 @@
     "reroute_success":{"type":["boolean","null"]}, "new_required_skill_recall":{"type":["number","null"],"minimum":0,"maximum":1},
     "premature_activation_count":{"type":"integer","minimum":0}, "wrong_skill_count":{"type":"integer","minimum":0},
     "discovery_count":{"type":"integer","minimum":0}, "repeated_discovery_count":{"type":"integer","minimum":0},
+    "redundant_discovery_count":{"type":"integer","minimum":0}, "duplicate_skill_activation_count":{"type":"integer","minimum":0},
     "skill_body_load_count":{"type":"integer","minimum":0}, "bundle_create_count":{"type":["integer","null"],"minimum":0},
     "bundle_extend_count":{"type":["integer","null"],"minimum":0}, "bundle_reuse_count":{"type":["integer","null"],"minimum":0},
     "llm_input_tokens":{"type":"integer","minimum":0}, "llm_output_tokens":{"type":"integer","minimum":0},

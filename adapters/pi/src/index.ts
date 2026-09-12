@@ -40,7 +40,7 @@ export class PiSidecarAdapter {
     pi.on("session_start", async (_event, ctx) => {
       await this.handleSessionStart(ctx);
     });
-    pi.on("turn_start", async () => {
+    pi.on("agent_start", async () => {
       await this.handleTurnStart();
     });
     pi.on("before_agent_start", async () => {
@@ -49,7 +49,7 @@ export class PiSidecarAdapter {
     pi.on("context", async (event) => {
       return { messages: await this.projectContext(event.messages as AgentMessage[]) };
     });
-    pi.on("turn_end", async () => {
+    pi.on("agent_end", async () => {
       await this.handleTurnEnd();
     });
     pi.on("session_compact", async (_event, ctx) => {
