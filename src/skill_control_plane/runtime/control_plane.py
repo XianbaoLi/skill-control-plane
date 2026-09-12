@@ -2,9 +2,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping
 
-from skill_control_plane.discovery import SkillDiscovery, SkillDiscoveryResult
+from skill_control_plane.discovery import (
+    SkillDiscovery,
+    SkillDiscoveryResult,
+    load_retrieval_cards,
+    validate_retrieval_cards,
+)
 from skill_control_plane.models import RetrievalCandidate
 from skill_control_plane.registry import SkillStore
 
@@ -75,6 +81,10 @@ class ControlPlaneTurnAudit:
     body_load_count: int
 
 
+class ControlPlaneConfigurationError(ValueError):
+    """The production runtime was not given complete Discovery configuration."""
+
+
 class SkillControlPlane:
     """Stable structured API for Agent integrations.
 
@@ -94,9 +104,23 @@ class SkillControlPlane:
         max_searches_per_turn: int = 3,
     ) -> None:
         if discovery is None:
-            discovery = SkillDiscovery(store)
+            raise ControlPlaneConfigurationError(
+                "SkillControlPlane requires configured SkillDiscovery with "
+                "Retrieval Cards, Dense, and RRF")
         if discovery.registry is not store:
-            raise ValueError("discovery must use the supplied SkillStore")
+            raise ControlPlaneConfigurationError(
+                "discovery must use the supplied SkillStore")
+        try:
+            validate_retrieval_cards(store, discovery.retrieval_cards)
+        except ValueError as exc:
+            raise ControlPlaneConfigurationError(
+                f"invalid Retrieval Card configuration: {exc}") from exc
+        if discovery.dense is None:
+            raise ControlPlaneConfigurationError(
+                "SkillControlPlane requires a configured Dense backend")
+        if discovery.fusion_backend != "rrf":
+            raise ControlPlaneConfigurationError(
+                "SkillControlPlane requires the RRF fusion path")
         if memory is not None and state is not None:
             raise ValueError("provide state or memory, not both")
         if memory is None:
@@ -124,6 +148,35 @@ class SkillControlPlane:
         self._discovery = discovery
         self._memory = memory
         self._session = discovery_session
+
+    @classmethod
+    def from_tree(
+        cls,
+        skill_root,
+        *,
+        retrieval_cards,
+        dense_factory,
+        max_searches_per_turn: int = 3,
+    ) -> "SkillControlPlane":
+        """Build the production runtime from mandatory complete Discovery inputs."""
+
+        if retrieval_cards is None:
+            raise ControlPlaneConfigurationError(
+                "SkillControlPlane.from_tree requires Retrieval Cards")
+        if dense_factory is None:
+            raise ControlPlaneConfigurationError(
+                "SkillControlPlane.from_tree requires a Dense factory")
+        store = SkillStore.from_tree(skill_root)
+        cards = (load_retrieval_cards(retrieval_cards)
+                 if isinstance(retrieval_cards, (str, Path))
+                 else dict(retrieval_cards))
+        discovery = SkillDiscovery(
+            store, dense_factory=dense_factory, retrieval_cards=cards)
+        return cls(
+            store,
+            discovery=discovery,
+            max_searches_per_turn=max_searches_per_turn,
+        )
 
     def begin_turn(self) -> None:
         self._session.begin_turn()

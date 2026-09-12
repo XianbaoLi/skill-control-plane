@@ -7,6 +7,7 @@ from skill_control_plane.discovery.discovery import SkillDiscovery
 from skill_control_plane.runtime import SkillControlPlane
 from skill_control_plane.runtime.capability_memory import ActiveBundle, RuntimeCapabilityState
 from skill_control_plane.integrations.reference_agent import ExperimentalSkillAgent
+from tests.support import full_discovery
 
 
 class Client:
@@ -18,7 +19,7 @@ def configured_discovery():
     registry = SkillRegistry([SkillRecord(
         'powerpoint', 'PowerPoint', 'presentation slides',
         'PRIVATE BODY', '/powerpoint/SKILL.md')])
-    return SkillDiscovery(registry)
+    return full_discovery(registry)
 
 
 def harness():

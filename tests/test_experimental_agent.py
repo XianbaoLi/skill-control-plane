@@ -13,6 +13,7 @@ from skill_control_plane.integrations.reference_agent import (
     CAPABILITY_TOOLS, ExperimentalSkillAgent, AgentStepLimitError,
     dto_payload, parse_tool_arguments,
 )
+from tests.support import full_discovery
 
 
 def make_runtime(state=None, *, discovery=None):
@@ -22,7 +23,7 @@ def make_runtime(state=None, *, discovery=None):
         SkillRecord('mail', 'Mail', 'email inbox', 'MAIL_BODY_ONLY_SELECTED', ''),
         SkillRecord('hidden', 'Astronomy', 'unrelated astronomy', 'HIDDEN_BODY_NEVER_VISIBLE', ''),
     ])
-    discovery = discovery or SkillDiscovery(store)
+    discovery = discovery or full_discovery(store)
     return SkillControlPlane(store, discovery=discovery, state=state)
 
 
@@ -305,7 +306,7 @@ def test_bundle_surface_uses_member_metadata_only(harness):
         SkillRecord('mail', 'Mail', 'email inbox', 'MAIL_BODY_ONLY_SELECTED', ''),
         SkillRecord('hidden', 'Astronomy', 'unrelated astronomy', 'HIDDEN_BODY_NEVER_VISIBLE', ''),
     ])
-    discovery = SkillDiscovery(store)
+    discovery = full_discovery(store)
     discovery.records['pdf'] = replace(discovery.records['pdf'],
         description='  extract\n PDF text  ' + 'detail ' * 100,
         retrieval_representation='SECRET_CARD')
@@ -328,7 +329,7 @@ def test_load_capability_model_surface_hides_full_retrieval_record(harness):
         SkillRecord('pdf', 'PDF', 'extract PDF text', 'PDF_BODY_ONLY_SELECTED', ''),
         SkillRecord('slides', 'Slides', 'presentation slides', 'SLIDES_BODY_ONLY_SELECTED', ''),
     ])
-    discovery = SkillDiscovery(store)
+    discovery = full_discovery(store)
     discovery.records['pdf'] = replace(
         discovery.records['pdf'], retrieval_representation='SECRET_FULL_CARD')
     discovery.texts['pdf'] = 'SECRET_FULL_CARD'

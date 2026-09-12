@@ -12,6 +12,7 @@ from skill_control_plane.runtime.capability_memory import ActiveBundle, RuntimeC
 from skill_control_plane.integrations.reference_agent import (
     ExperimentalSkillAgent, dto_payload, parse_tool_arguments,
 )
+from tests.support import full_discovery
 
 
 def harness(state=None):
@@ -22,7 +23,7 @@ def harness(state=None):
                     'PPT BODY', ''),
     ]
     store = SkillRegistry(records)
-    return SkillControlPlane(store, discovery=SkillDiscovery(store), state=state)
+    return SkillControlPlane(store, discovery=full_discovery(store), state=state)
 
 
 def native(name, arguments):

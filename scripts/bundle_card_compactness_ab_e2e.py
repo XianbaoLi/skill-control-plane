@@ -14,6 +14,10 @@ from skill_control_plane.cli import _validate_root_snapshot
 from skill_control_plane.corpus.bigmodel_chat import BigModelChatClient
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.cards import load_retrieval_cards
+from skill_control_plane.discovery.bigmodel import (
+    BigModelDenseRetriever,
+    BigModelEmbeddingClient,
+)
 from skill_control_plane.discovery.discovery import SkillDiscovery
 from skill_control_plane.runtime import SkillControlPlane
 from skill_control_plane.runtime.capability_memory import ActiveBundle, RuntimeCapabilityState
@@ -307,7 +311,17 @@ def main():
         _validate_root_snapshot(str(ROOT), str(MANIFEST))
         cards = load_retrieval_cards(CARDS)
         registry = SkillRegistry.from_tree(ROOT)
-        discovery = SkillDiscovery(registry, retrieval_cards=cards)
+        embedding = BigModelEmbeddingClient(timeout=45)
+        discovery = SkillDiscovery(
+            registry,
+            retrieval_cards=cards,
+            dense_factory=lambda records: BigModelDenseRetriever(
+                records,
+                model_name=embedding.model,
+                dimensions=embedding.dimensions,
+                embed_batch=embedding,
+            ),
+        )
         glm = BigModelChatClient(timeout=60, max_tokens=4096)
         report['model'] = glm.model
         report['scaling'] = scaling_report(discovery)

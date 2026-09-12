@@ -30,7 +30,10 @@ runtime/capability_memory ─────────────────→
 `SkillControlPlane` is the only supported Agent-facing entry point. It composes
 the Store, Discovery, Discovery Session, and Capability Memory behind structured
 dataclass inputs and outputs; Core does not build prompts, tool schemas, provider
-messages, or tool-call JSON.
+messages, or tool-call JSON. The production entry point fails closed unless every
+Skill has a current Retrieval Card and Dense is configured, so its search backend
+is always Retrieval Card v0.1 + BM25 + Dense + RRF. BM25-only construction is
+retained solely for explicit low-level eval ablations.
 
 `evals` is a sidecar validation system and is not part of the production runtime
 chain. Historical V0.x implementations live under `skill_control_plane.evals.legacy`.
@@ -61,20 +64,34 @@ python -m pip install -e ".[dev]"
 pytest -q
 ```
 
-Minimal supported construction:
+Supported production construction (the embedding client reads its provider
+credentials from the environment):
 
 ```python
-from skill_control_plane import (
-    SkillControlPlane, SkillDiscovery, SkillStore,
+from skill_control_plane import SkillControlPlane
+from skill_control_plane.discovery.bigmodel import (
+    BigModelDenseRetriever,
+    BigModelEmbeddingClient,
 )
 
-store = SkillStore.from_tree("/path/to/skills")
-discovery = SkillDiscovery(store)
-control_plane = SkillControlPlane(store, discovery=discovery)
+embedding = BigModelEmbeddingClient()
+control_plane = SkillControlPlane.from_tree(
+    "/path/to/skills",
+    retrieval_cards="/path/to/retrieval-cards-v0.1.jsonl",
+    dense_factory=lambda records: BigModelDenseRetriever(
+        records,
+        model_name=embedding.model,
+        dimensions=embedding.dimensions,
+        embed_batch=embedding,
+    ),
+)
 
 control_plane.begin_turn()
 snapshot = control_plane.context_snapshot()
 ```
+
+Missing, extra, content-hash-stale or wrong-version Cards, or a missing Dense
+backend, are configuration errors. There is no production BM25-only fallback.
 
 `RuntimeCapabilityHarness` remains importable only from
 `skill_control_plane.runtime.capability_harness` for historical experiments. It

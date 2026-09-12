@@ -1,16 +1,18 @@
 import ast
 import inspect
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from skill_control_plane import (
     CapabilityDecision,
+    ControlPlaneConfigurationError,
     CoverageClaim,
     SkillControlPlane,
 )
-from skill_control_plane.discovery import SkillDiscovery
+from skill_control_plane.discovery import RetrievalCard, SkillDiscovery
 from skill_control_plane.integrations.reference_agent import (
     CAPABILITY_TOOLS,
     ReferenceSkillAgent,
@@ -20,6 +22,11 @@ from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillStore
 from skill_control_plane.runtime import CapabilityMemory, DiscoverySession
 from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
+from tests.support import (
+    DeterministicFakeDenseRetriever,
+    complete_cards,
+    full_discovery,
+)
 
 
 PACKAGE = Path(__file__).parents[1] / "src" / "skill_control_plane"
@@ -134,11 +141,11 @@ def test_capability_memory_owns_bundle_body_residency_and_exact_reload():
 
 def test_public_control_plane_full_structured_lifecycle():
     store = _store()
-    plane = SkillControlPlane(store, discovery=SkillDiscovery(store))
+    plane = SkillControlPlane(store, discovery=full_discovery(store))
     plane.begin_turn()
     search = plane.search_capability("create slides")
     assert search.candidates[0].skill_id == "slides"
-    assert search.retrieval_trace.backend == "bm25"
+    assert search.retrieval_trace.backend == "rrf"
 
     applied = plane.apply_capability(CapabilityDecision(
         action="CREATE",
@@ -158,6 +165,68 @@ def test_public_control_plane_full_structured_lifecycle():
     plane.mark_all_skill_bodies_evicted()
     assert plane.context_snapshot().skill_body_states == {"slides": "evicted"}
     assert plane.turn_audit().body_load_count == 1
+
+
+def test_control_plane_rejects_absent_retrieval_cards():
+    store = _store()
+    discovery = SkillDiscovery(
+        store, dense_factory=DeterministicFakeDenseRetriever)
+    with pytest.raises(ControlPlaneConfigurationError, match="missing=.*ocr"):
+        SkillControlPlane(store, discovery=discovery)
+
+
+@pytest.mark.parametrize("mutation, expected", [
+    ("missing", "missing=.*slides"),
+    ("extra", "extra=.*unknown"),
+    ("stale", "stale=.*ocr"),
+    ("version", "invalid_version=.*ocr"),
+])
+def test_control_plane_rejects_card_corpus_mismatch(mutation, expected):
+    store = _store()
+    cards = complete_cards(store)
+    if mutation == "missing":
+        del cards["slides"]
+    elif mutation == "extra":
+        cards["unknown"] = RetrievalCard(
+            skill_id="unknown",
+            source_content_hash="unknown-hash",
+            purpose="unknown",
+            use_when=("unknown",),
+            capabilities=("unknown",),
+            lexical_cues=("unknown",),
+        )
+    elif mutation == "stale":
+        cards["ocr"] = replace(cards["ocr"], source_content_hash="stale-hash")
+    else:
+        cards["ocr"] = replace(cards["ocr"], version="retrieval-card-v0.0")
+    discovery = SkillDiscovery(
+        store,
+        retrieval_cards=cards,
+        dense_factory=DeterministicFakeDenseRetriever,
+    )
+    with pytest.raises(ControlPlaneConfigurationError, match=expected):
+        SkillControlPlane(store, discovery=discovery)
+
+
+def test_control_plane_rejects_missing_dense_backend():
+    store = _store()
+    discovery = SkillDiscovery(store, retrieval_cards=complete_cards(store))
+    with pytest.raises(ControlPlaneConfigurationError, match="Dense backend"):
+        SkillControlPlane(store, discovery=discovery)
+
+
+def test_complete_fake_discovery_uses_rrf():
+    store = _store()
+    plane = SkillControlPlane(store, discovery=full_discovery(store))
+    result = plane.search_capability("extract scanned text")
+    assert result.retrieval_trace.backend == "rrf"
+    assert {"bm25", "dense"} <= set(
+        result.retrieval_trace.candidates[0].source_scores)
+
+
+def test_low_level_eval_discovery_can_remain_bm25_only():
+    result = SkillDiscovery(_store()).discover_skills("create slides")
+    assert result.backend == "bm25"
 
 
 def test_strict_tool_argument_parsing_is_public_integration_behavior():
@@ -191,3 +260,4 @@ def test_historical_harness_is_deprecated_compatible_and_not_formal_api():
     assert "RuntimeCapabilityHarness" not in __import__(
         "skill_control_plane").__all__
     assert not hasattr(SkillControlPlane, "load_capability")
+    assert not hasattr(harness, "control_plane")

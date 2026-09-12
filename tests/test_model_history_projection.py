@@ -12,6 +12,7 @@ from skill_control_plane.integrations.reference_agent import (
     EVICTED_BODY_TOMBSTONE, SUPERSEDED_BODY_TOMBSTONE,
     ExperimentalSkillAgent,
 )
+from tests.support import full_discovery
 
 
 POWERPOINT_BODY = 'FULL POWERPOINT SKILL BODY'
@@ -32,7 +33,7 @@ def make_agent(*, powerpoint='resident', pdf='resident'):
         ActiveBundle('documents', 'Document work', ('powerpoint', 'pdf')),
     ], skill_body_states={'powerpoint': powerpoint, 'pdf': pdf})
     control_plane = SkillControlPlane(
-        registry, discovery=SkillDiscovery(registry), state=state)
+        registry, discovery=full_discovery(registry), state=state)
     return ExperimentalSkillAgent(control_plane, NoCallClient())
 
 

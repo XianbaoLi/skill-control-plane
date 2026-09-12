@@ -55,6 +55,12 @@ class SkillDiscovery:
         self.bm25 = BM25Retriever(indexed)
         self.dense = dense_factory(indexed) if dense_factory else None
 
+    @property
+    def fusion_backend(self) -> str:
+        """Configured search path; production requires ``rrf``."""
+
+        return "rrf" if self.dense is not None else "bm25"
+
     def capability_phrases(self, skill_id: str) -> tuple[str, ...]:
         """Expose structured Retrieval Card coverage without searching."""
 
@@ -103,7 +109,7 @@ class SkillDiscovery:
         chosen = tuple(candidates[:k])
         return SkillDiscoveryResult(query, chosen,
             tuple((c.skill_id, self.texts[c.skill_id]) for c in chosen),
-            "rrf" if self.dense is not None else "bm25", len(candidates) > k)
+            self.fusion_backend, len(candidates) > k)
 
     def model_visible_payload(self, result: SkillDiscoveryResult) -> dict:
         """Serialize candidates for an LLM without exposing retrieval cards/debug data."""

@@ -236,10 +236,15 @@ def validate_retrieval_cards(
         if skill_id in cards
         and cards[skill_id].source_content_hash != skill.content_hash
     )
-    if missing or extra or stale:
+    invalid_version = sorted(
+        skill_id for skill_id, card in cards.items()
+        if card.version != RETRIEVAL_CARD_VERSION
+    )
+    if missing or extra or stale or invalid_version:
         raise ValueError(
             "retrieval-card corpus mismatch: "
-            f"missing={missing[:8]} extra={extra[:8]} stale={stale[:8]}"
+            f"missing={missing[:8]} extra={extra[:8]} stale={stale[:8]} "
+            f"invalid_version={invalid_version[:8]}"
         )
 
 

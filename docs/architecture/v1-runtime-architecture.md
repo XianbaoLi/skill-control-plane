@@ -61,6 +61,13 @@ Core accepts no provider message or tool-call envelope and emits no system promp
 native tool schema, or model-specific JSON text. Integration adapters parse strict
 tool-argument JSON, serialize DTOs, inject prompts/context, and project history.
 
+The production facade accepts only a fully configured Discovery index. At
+construction it verifies that every stored Skill has exactly one Retrieval Card
+v0.1, no Card is missing or extra, every Card content hash matches its Skill, a
+Dense backend exists, and the fusion path is RRF. Any mismatch is a configuration
+error and startup fails closed. `SkillControlPlane.from_tree()` requires both the
+Retrieval Card corpus and a Dense factory; it does not synthesize either one.
+
 ## Canonical entities
 
 ### Skill
@@ -109,10 +116,12 @@ eligible apply or exact reload. The current body state controls model visibility
 
 ### Retrieval First
 
-Search narrows the Store before semantic selection. Discovery performs one BM25
-search and, when configured, one Dense search, combining them with RRF. It returns
-a Compact Candidate Surface and retrieval trace without mutating turn or Bundle
-state.
+Search narrows the Store before semantic selection. Production Discovery always
+indexes Retrieval Card v0.1 plus Skill metadata, performs one BM25 search and one
+Dense search, and combines them with RRF. It returns a Compact Candidate Surface
+and retrieval trace without mutating turn or Bundle state. The low-level
+`SkillDiscovery` BM25-only path exists only so evals can reproduce historical
+ablations; it is rejected by `SkillControlPlane` and is not a production mode.
 
 ### Candidate Closure
 
@@ -177,7 +186,9 @@ Retrieval Cards, rankings, Bundles, turn state or model history.
 `discovery/cards.py`, retrievers and fusion own Retrieval Cards, BM25, Dense and
 RRF. `SkillDiscovery.discover_skills` is one immutable-index search. It emits the
 compact candidate payload and trace, but owns no pending pool, budget, sufficiency
-or Bundle commit.
+or Bundle commit. It remains independently constructible for eval-only BM25-only,
+Dense-only, Union and RRF comparisons. Production composition is fixed to complete
+Cards + BM25 + Dense + RRF and does not silently degrade.
 
 ### Runtime — Discovery Session
 
@@ -265,7 +276,8 @@ modules to validate behavior.
 
 ```bash
 PYTHONPATH=src .venv/bin/pytest -q
-python -m compileall -q src tests scripts
+PYTHONPATH=src .venv/bin/pytest -q -W error::DeprecationWarning
+.venv/bin/python -m compileall -q src tests scripts
 git diff --check
 ```
 

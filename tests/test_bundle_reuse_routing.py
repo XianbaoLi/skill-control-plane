@@ -10,10 +10,11 @@ from skill_control_plane.runtime.capability_memory import ActiveBundle, RuntimeC
 from skill_control_plane.integrations.reference_agent import (
     AGENT_INSTRUCTIONS, ExperimentalSkillAgent, dto_payload,
 )
+from tests.support import complete_cards, full_discovery
 
 
 def card(skill_id, capabilities, use_when=()):
-    return RetrievalCard(skill_id, 'hash', 'purpose', tuple(use_when),
+    return RetrievalCard(skill_id, '', 'purpose', tuple(use_when),
                          tuple(capabilities), ('cue',))
 
 
@@ -25,7 +26,8 @@ def harness(body_state='resident'):
         SkillRecord('xlsx', 'Excel', 'spreadsheet metadata',
                     'PRIVATE_XLSX_BODY', '/xlsx/SKILL.md'),
     ]
-    cards = {'powerpoint': card('powerpoint', (
+    cards = complete_cards(SkillRegistry(records))
+    cards['powerpoint'] = card('powerpoint', (
         'create presentation slides',
         'edit existing presentations',
         'EDIT EXISTING PRESENTATIONS',
@@ -36,7 +38,7 @@ def harness(body_state='resident'):
         'render presentations',
         'export presentations',
         'ninth bounded item',
-    ), ('continue presentation work',))}
+    ), ('continue presentation work',))
     registry = SkillRegistry(records)
     state = RuntimeCapabilityState(
         [ActiveBundle('presentation-work', 'Create and revise presentations',
@@ -44,7 +46,7 @@ def harness(body_state='resident'):
         skill_body_states={'powerpoint': body_state},
     )
     return SkillControlPlane(
-        registry, discovery=SkillDiscovery(registry, retrieval_cards=cards), state=state)
+        registry, discovery=full_discovery(registry, cards=cards), state=state)
 
 
 class Client:
@@ -101,7 +103,7 @@ def test_compact_capabilities_round_robin_members_and_remove_containment():
     }
     store = SkillRegistry(records)
     runtime = SkillControlPlane(
-        store, discovery=SkillDiscovery(store, retrieval_cards=cards),
+        store, discovery=full_discovery(store, cards=cards),
         state=RuntimeCapabilityState([
             ActiveBundle('documents', 'Document work', ('b', 'a'))],
             skill_body_states={'a': 'resident', 'b': 'evicted'}),
@@ -117,10 +119,11 @@ def test_compact_capabilities_use_one_prioritized_fallback_representation():
         SkillRecord('use', 'Use', 'description should not appear', '', ''),
         SkillRecord('description', 'Description', '  fallback\n description  ', '', ''),
     ]
-    cards = {'use': card('use', (), ('use-when fallback',))}
+    cards = complete_cards(SkillRegistry(records))
+    cards['use'] = card('use', (), ('use-when fallback',))
     store = SkillRegistry(records)
     runtime = SkillControlPlane(
-        store, discovery=SkillDiscovery(store, retrieval_cards=cards),
+        store, discovery=full_discovery(store, cards=cards),
         state=RuntimeCapabilityState([
             ActiveBundle('fallbacks', 'Fallbacks', ('use', 'description'))],
             skill_body_states={'use': 'resident', 'description': 'resident'}),

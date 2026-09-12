@@ -11,6 +11,7 @@ from skill_control_plane.runtime import SkillControlPlane
 from skill_control_plane.integrations.reference_agent import (
     CAPABILITY_TOOLS, ExperimentalSkillAgent, dto_payload, parse_tool_arguments,
 )
+from tests.support import full_discovery
 
 
 def tool(name, arguments):
@@ -40,7 +41,7 @@ def harness():
         SkillRecord('pdf', 'PDF', 'read PDF documents',
                     'FULL_PDF_SKILL_BODY', '/skills/pdf/SKILL.md'),
     ])
-    return SkillControlPlane(registry, discovery=SkillDiscovery(registry))
+    return SkillControlPlane(registry, discovery=full_discovery(registry))
 
 
 def create_powerpoint(harness):

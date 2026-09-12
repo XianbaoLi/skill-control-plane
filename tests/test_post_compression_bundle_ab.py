@@ -6,6 +6,7 @@ from pathlib import Path
 from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.discovery import SkillDiscovery
+from tests.support import full_discovery
 
 
 def experiment_module():
@@ -22,10 +23,11 @@ class Client:
 
 
 def discovery():
-    return SkillDiscovery(SkillRegistry([
+    store = SkillRegistry([
         SkillRecord('powerpoint', 'PowerPoint', 'presentation slides',
                     'FULL PRIVATE BODY', '/powerpoint/SKILL.md'),
-    ]))
+    ])
+    return full_discovery(store)
 
 
 def test_frozen_snapshot_and_compressed_history_are_identical_across_arms():

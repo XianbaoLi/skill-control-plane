@@ -9,11 +9,12 @@ from skill_control_plane.evals.bundle_behavior import TASKS, evaluate_turns, run
 from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.discovery import SkillDiscovery
+from tests.support import full_discovery
 
 
 @pytest.fixture
 def discovery():
-    return SkillDiscovery(SkillRegistry([
+    store = SkillRegistry([
         SkillRecord(s, s, desc, s.upper() + '_PRIVATE_BODY', '') for s, desc in [
             ('pdf', 'scanned PDF OCR document production'),
             ('ocr-and-documents', 'scanned PDF OCR document production'),
@@ -22,7 +23,8 @@ def discovery():
             ('systematic-debugging', 'GitHub CI failure debugging reproduction'),
             ('hidden', 'unrelated astronomy'),
         ]
-    ]))
+    ])
+    return full_discovery(store)
 
 
 def native(name, arguments):

@@ -13,6 +13,10 @@ from skill_control_plane.cli import _validate_root_snapshot
 from skill_control_plane.corpus.bigmodel_chat import BigModelChatClient
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.cards import load_retrieval_cards
+from skill_control_plane.discovery.bigmodel import (
+    BigModelDenseRetriever,
+    BigModelEmbeddingClient,
+)
 from skill_control_plane.discovery.discovery import SkillDiscovery
 from skill_control_plane.runtime import SkillControlPlane
 from skill_control_plane.runtime.capability_memory import ActiveBundle, RuntimeCapabilityState
@@ -291,11 +295,27 @@ def main():
         _validate_root_snapshot(str(ROOT), str(MANIFEST))
         cards = load_retrieval_cards(CARDS)
         full_registry = SkillRegistry.from_tree(ROOT)
+        embedding = BigModelEmbeddingClient(timeout=45)
+
+        def dense_factory(records):
+            return BigModelDenseRetriever(
+                records,
+                model_name=embedding.model,
+                dimensions=embedding.dimensions,
+                embed_batch=embedding,
+            )
+
         discoveries = {
-            'full': SkillDiscovery(full_registry, retrieval_cards=cards),
+            'full': SkillDiscovery(
+                full_registry,
+                retrieval_cards=cards,
+                dense_factory=dense_factory,
+            ),
             'limited': SkillDiscovery(
                 SkillRegistry([full_registry.get(skill_id) for skill_id in LIMITED_IDS]),
-                retrieval_cards={skill_id: cards[skill_id] for skill_id in LIMITED_IDS}),
+                retrieval_cards={skill_id: cards[skill_id] for skill_id in LIMITED_IDS},
+                dense_factory=dense_factory,
+            ),
         }
         glm = BigModelChatClient(timeout=60, max_tokens=4096)
         report['model'] = glm.model

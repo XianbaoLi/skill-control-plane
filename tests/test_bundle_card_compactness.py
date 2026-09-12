@@ -6,6 +6,7 @@ from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.cards import RetrievalCard
 from skill_control_plane.discovery.discovery import SkillDiscovery
+from tests.support import complete_cards, full_discovery
 
 
 class Client:
@@ -27,11 +28,13 @@ def discovery():
                     'POWERPOINT BODY', ''),
         SkillRecord('xlsx', 'Excel', 'spreadsheet description', 'XLSX BODY', ''),
     ]
-    cards = {'powerpoint': RetrievalCard(
-        'powerpoint', 'hash', 'presentations', ('when editing slides',),
+    store = SkillRegistry(records)
+    cards = complete_cards(store)
+    cards['powerpoint'] = RetrievalCard(
+        'powerpoint', '', 'presentations', ('when editing slides',),
         ('create slides', 'edit layouts', 'render presentations',
-         'export presentations', 'validate slides', 'extra capability'), ('ppt',))}
-    return SkillDiscovery(SkillRegistry(records), retrieval_cards=cards)
+         'export presentations', 'validate slides', 'extra capability'), ('ppt',))
+    return full_discovery(store, cards=cards)
 
 
 def test_ab_agents_differ_only_in_bundle_surface():
@@ -102,11 +105,11 @@ def test_scaling_uses_realistic_fixed_bundles_and_compact_is_smaller():
         records.append(SkillRecord(
             skill_id, skill_id, f'{skill_id} long member description', '', ''))
         cards[skill_id] = RetrievalCard(
-            skill_id, 'hash', bundle.purpose, (f'use {skill_id}',),
+            skill_id, '', bundle.purpose, (f'use {skill_id}',),
             tuple(f'{skill_id} capability number {index}' for index in range(6)),
             (skill_id,))
-    rows = experiment.scaling_report(SkillDiscovery(
-        SkillRegistry(records), retrieval_cards=cards))
+    store = SkillRegistry(records)
+    rows = experiment.scaling_report(full_discovery(store, cards=cards))
     assert [row['bundle_count'] for row in rows] == [1, 3, 5, 10]
     assert all(row['compact']['chars'] < row['old']['chars'] for row in rows)
     assert all(row['compact']['estimated_tokens_per_bundle']
