@@ -15,9 +15,16 @@ from skill_control_plane.models import RetrievalCandidate
 from skill_control_plane.registry import SkillStore
 
 from .capability_memory import (
+    STATE_SNAPSHOT_VERSION,
     BundleSnapshot,
     CapabilityMemory,
+    StateSnapshotBundleV1,
+    StateSnapshotMemberV1,
+    StateSnapshotV1,
     RuntimeCapabilityState,
+    capability_store_fingerprint,
+    validate_state,
+    validate_state_snapshot,
     SkillBodyLoadResult,
 )
 from .discovery_session import (
@@ -83,6 +90,24 @@ class ControlPlaneTurnAudit:
 
 class ControlPlaneConfigurationError(ValueError):
     """The production runtime was not given complete Discovery configuration."""
+
+
+@dataclass(frozen=True, slots=True)
+class ReadinessCheck:
+    name: str
+    ready: bool
+    detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ControlPlaneReadiness:
+    ready: bool
+    skill_count: int
+    retrieval_cards_ready: bool
+    dense_ready: bool
+    fusion_backend: str
+    checks: tuple[ReadinessCheck, ...]
+    errors: tuple[str, ...]
 
 
 class SkillControlPlane:
@@ -238,6 +263,103 @@ class SkillControlPlane:
             session=self._session.audit(),
             retrieval_call_count=self._session.retrieval_call_count,
             body_load_count=self._memory.body_load_count,
+        )
+
+    def export_state(self) -> StateSnapshotV1:
+        validate_state(self._memory.state, self._store)
+        return StateSnapshotV1(
+            version=STATE_SNAPSHOT_VERSION,
+            store_fingerprint=capability_store_fingerprint(self._store),
+            bundles=tuple(
+                StateSnapshotBundleV1(
+                    bundle_id=bundle.bundle_id,
+                    purpose=bundle.purpose,
+                    members=tuple(
+                        StateSnapshotMemberV1(
+                            skill_id=skill_id,
+                            member_role=self._memory.state.bundle_member_roles[
+                                bundle.bundle_id][skill_id],
+                            body_state=self._memory.state.skill_body_states[
+                                skill_id],
+                        )
+                        for skill_id in bundle.skill_ids
+                    ),
+                )
+                for bundle in self._memory.state.active_bundles
+            ),
+        )
+
+    def restore_state(self, snapshot: StateSnapshotV1) -> None:
+        state = validate_state_snapshot(snapshot, self._store)
+        memory = CapabilityMemory(
+            self._store,
+            state,
+            capability_phrases=self._memory.capability_phrases,
+            bundle_capability_phrases=self._memory.bundle_capability_phrases,
+        )
+        session = DiscoverySession(
+            self._discovery,
+            memory,
+            max_searches=self._session.max_searches,
+        )
+        self._memory = memory
+        self._session = session
+
+    def readiness(self) -> ControlPlaneReadiness:
+        checks: list[ReadinessCheck] = []
+        errors: list[str] = []
+
+        store_check = ReadinessCheck(
+            name="skill_store", ready=True,
+            detail=f"{len(self._store)} Skill records")
+        checks.append(store_check)
+
+        retrieval_cards_ready = True
+        try:
+            validate_retrieval_cards(
+                self._store, self._discovery.retrieval_cards)
+        except ValueError as exc:
+            retrieval_cards_ready = False
+            errors.append(str(exc))
+        checks.append(ReadinessCheck(
+            name="retrieval_cards",
+            ready=retrieval_cards_ready,
+            detail="complete and hash-current" if retrieval_cards_ready else "",
+        ))
+
+        dense_configured = self._discovery.dense is not None
+        fusion_backend = self._discovery.fusion_backend
+        fusion_ready = fusion_backend == "rrf"
+        checks.append(ReadinessCheck(
+            name="dense_backend", ready=dense_configured,
+            detail="configured" if dense_configured else "missing"))
+        checks.append(ReadinessCheck(
+            name="fusion_backend", ready=fusion_ready,
+            detail=fusion_backend))
+
+        dense_ready = dense_configured
+        if retrieval_cards_ready and dense_ready and fusion_ready:
+            try:
+                result = self._discovery.discover_skills(
+                    "readiness probe", k=1)
+                if result.backend != "rrf":
+                    raise ValueError("readiness probe did not use RRF")
+            except Exception as exc:
+                dense_ready = False
+                errors.append(f"dense/RRF readiness probe failed: {exc}")
+        checks.append(ReadinessCheck(
+            name="dense_rrf_probe", ready=dense_ready,
+            detail="executed" if dense_ready else "not executed"))
+
+        ready = store_check.ready and all(check.ready for check in checks)
+        return ControlPlaneReadiness(
+            ready=ready,
+            skill_count=len(self._store),
+            retrieval_cards_ready=retrieval_cards_ready,
+            dense_ready=dense_ready,
+            fusion_backend=fusion_backend,
+            checks=tuple(checks),
+            errors=tuple(errors),
         )
 
     def _compact_candidates(

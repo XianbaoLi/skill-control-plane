@@ -11,6 +11,9 @@ from .capability_memory import (
     RuntimeCapabilityState,
     SkillBody,
     SkillBodyLoadResult,
+    StateSnapshotBundleV1,
+    StateSnapshotMemberV1,
+    StateSnapshotV1,
 )
 from .control_plane import (
     Candidate,
@@ -18,6 +21,8 @@ from .control_plane import (
     ContextSnapshot,
     ControlPlaneConfigurationError,
     ControlPlaneTurnAudit,
+    ControlPlaneReadiness,
+    ReadinessCheck,
     RetrievalTrace,
     SkillControlPlane,
 )
@@ -53,5 +58,10 @@ __all__ = [
     "SkillBody",
     "SkillBodyLoadResult",
     "SkillControlPlane",
+    "StateSnapshotBundleV1",
+    "StateSnapshotMemberV1",
+    "StateSnapshotV1",
     "TurnAudit",
+    "ControlPlaneReadiness",
+    "ReadinessCheck",
 ]

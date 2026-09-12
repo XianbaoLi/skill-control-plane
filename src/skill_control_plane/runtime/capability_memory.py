@@ -1,12 +1,16 @@
 """Cross-turn Bundle memory and Skill body residency."""
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
-from typing import Literal, Mapping
+from typing import Literal, Mapping, get_args
 from uuid import uuid4
 
 from skill_control_plane.registry import SkillStore
+
+
+STATE_SNAPSHOT_VERSION = "state-snapshot-v1"
 
 
 @dataclass(frozen=True)
@@ -63,6 +67,29 @@ class SkillBodyLoadResult:
     skill_id: str
     bundle_ids: tuple[str, ...]
     body: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StateSnapshotMemberV1:
+    skill_id: str
+    member_role: MemberRole
+    body_state: BodyState
+
+
+@dataclass(frozen=True, slots=True)
+class StateSnapshotBundleV1:
+    bundle_id: str
+    purpose: str
+    members: tuple[StateSnapshotMemberV1, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class StateSnapshotV1:
+    """Versioned persistent Capability Memory, excluding turn-local state."""
+
+    version: Literal["state-snapshot-v1"] = STATE_SNAPSHOT_VERSION
+    store_fingerprint: str = ""
+    bundles: tuple[StateSnapshotBundleV1, ...] = ()
 
 
 @dataclass
@@ -158,6 +185,102 @@ def validate_state(state: RuntimeCapabilityState, store: SkillStore) -> None:
         raise ValueError("body state must exist exactly for Bundle members")
     if set(state.skill_body_states.values()) - {"resident", "evicted"}:
         raise ValueError("invalid Skill body state")
+
+
+def capability_store_fingerprint(store: SkillStore) -> str:
+    """Return a stable semantic identity for the Skill corpus."""
+
+    digest = hashlib.sha256()
+    for skill in sorted(store, key=lambda item: item.skill_id):
+        for value in (
+            skill.skill_id,
+            skill.name,
+            skill.description,
+            skill.body,
+            skill.content_hash,
+            "\x1f".join(skill.tags),
+        ):
+            encoded = value.encode("utf-8")
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+    return "skill-store-v1:" + digest.hexdigest()
+
+
+def validate_state_snapshot(
+    snapshot: StateSnapshotV1,
+    store: SkillStore,
+) -> RuntimeCapabilityState:
+    """Validate a snapshot completely and project it to canonical runtime state."""
+
+    if not isinstance(snapshot, StateSnapshotV1):
+        raise ValueError("restore_state requires StateSnapshotV1")
+    if snapshot.version != STATE_SNAPSHOT_VERSION:
+        raise ValueError(
+            f"unsupported state snapshot version: {snapshot.version!r}")
+    expected_fingerprint = capability_store_fingerprint(store)
+    if snapshot.store_fingerprint != expected_fingerprint:
+        raise ValueError("state snapshot Skill Store fingerprint mismatch")
+    if not isinstance(snapshot.bundles, tuple):
+        raise ValueError("state snapshot bundles must be a tuple")
+
+    active_bundles: list[ActiveBundle] = []
+    member_roles: dict[str, dict[str, MemberRole]] = {}
+    skill_body_states: dict[str, BodyState] = {}
+    bundle_ids: set[str] = set()
+    for bundle in snapshot.bundles:
+        if not isinstance(bundle, StateSnapshotBundleV1):
+            raise ValueError("state snapshot bundle has an invalid type")
+        if not isinstance(bundle.bundle_id, str) or not bundle.bundle_id.strip():
+            raise ValueError("state snapshot bundle requires a non-empty bundle_id")
+        if bundle.bundle_id in bundle_ids:
+            raise ValueError("duplicate active bundle id")
+        if not isinstance(bundle.purpose, str) or not bundle.purpose.strip():
+            raise ValueError("state snapshot Bundle requires a non-empty purpose")
+        if not isinstance(bundle.members, tuple):
+            raise ValueError("state snapshot Bundle members must be a tuple")
+
+        roles: dict[str, MemberRole] = {}
+        member_ids: list[str] = []
+        for member in bundle.members:
+            if not isinstance(member, StateSnapshotMemberV1):
+                raise ValueError("state snapshot member has an invalid type")
+            if not isinstance(member.skill_id, str) or not member.skill_id.strip():
+                raise ValueError("state snapshot member requires a skill_id")
+            if member.skill_id in member_ids:
+                raise ValueError("duplicate active bundle skill")
+            try:
+                store.get(member.skill_id)
+            except KeyError as exc:
+                raise ValueError(
+                    f"unknown state snapshot Skill: {member.skill_id}") from exc
+            if member.member_role not in get_args(MemberRole):
+                raise ValueError("invalid Bundle member role")
+            if member.body_state not in get_args(BodyState):
+                raise ValueError("invalid Skill body state")
+
+            member_ids.append(member.skill_id)
+            roles[member.skill_id] = member.member_role
+            skill_body_states[member.skill_id] = member.body_state
+
+        bundle_ids.add(bundle.bundle_id)
+        active_bundles.append(ActiveBundle(
+            bundle.bundle_id, bundle.purpose, tuple(member_ids)))
+        member_roles[bundle.bundle_id] = roles
+
+    direct_skills = {
+        skill_id
+        for roles in member_roles.values()
+        for skill_id, role in roles.items()
+        if role == "direct"
+    }
+    state = RuntimeCapabilityState(
+        active_bundles=active_bundles,
+        direct_skills=direct_skills,
+        skill_body_states=skill_body_states,
+        bundle_member_roles=member_roles,
+    )
+    validate_state(state, store)
+    return state
 
 
 class CapabilityMemory:
