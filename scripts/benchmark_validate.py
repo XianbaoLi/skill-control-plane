@@ -31,10 +31,11 @@ def validate() -> dict:
     assert len(runtime) == 20, "Runtime must contain exactly 20 scenarios"
     counts = Counter(task.raw.get("scenario_type") for task in runtime)
     assert counts == {"single-skill": 6, "multi-skill": 5,
-                      "stage-transition": 5, "reuse-session": 4}
+                      "dynamic-reroute": 5, "reuse-session": 4}
     leakage = []
     for task in scaling + runtime:
         assert task.raw["fixture"] in fixtures, f"unknown fixture: {task.raw['fixture']}"
+        assert task.raw.get("body_sufficient") is True
         for skill in task.required_skills:
             assert "S128" in memberships.get(skill, set()), f"{task.task_id}: invalid required Skill {skill}"
         if task.suite == "scaling":
@@ -48,12 +49,19 @@ def validate() -> dict:
         leakage.append({"task_id": task.task_id, "status": "pass", "checked_terms": sorted(terms)})
         if task.raw.get("scenario_type") == "multi-skill":
             assert 2 <= len(task.required_skills) <= 3
-        if task.raw.get("scenario_type") == "stage-transition":
-            assert len(task.raw["stages"]) >= 2
-            assert all(stage.get("required_skills") for stage in task.raw["stages"])
-            assert all(stage.get("trigger_evidence") for stage in task.raw["stages"][1:])
+        assert "stages" not in task.raw and "stage_id" not in task.raw
+        if task.raw.get("scenario_type") == "dynamic-reroute":
+            assert task.raw["initial_required_skills"]
+            assert task.raw["reroute_events"]
+            assert all(set(event) == {"event_id", "trigger_evidence", "new_required_skills"}
+                       for event in task.raw["reroute_events"])
+            visible = json.dumps(fixtures[task.raw["fixture"]].get("files", {})).casefold()
+            assert "benchmark_evidence" not in visible
+            for event in task.raw["reroute_events"]:
+                assert event["trigger_evidence"].casefold() not in visible
         if task.raw.get("scenario_type") == "reuse-session":
             assert len(task.raw.get("turns", [])) >= 2
+            assert all(turn.get("success_criteria") for turn in task.raw["turns"])
     offline = json.loads((BENCH / "offline-cost.json").read_text(encoding="utf-8"))
     for row in offline:
         validate_offline_cost(row)

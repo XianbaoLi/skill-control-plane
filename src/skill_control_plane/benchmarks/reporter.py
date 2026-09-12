@@ -5,10 +5,11 @@ from collections import defaultdict
 from statistics import mean
 from typing import Any
 
-SCALING_METRICS = ("task_success", "required_skill_recall", "wrong_skill_count",
-                   "llm_input_tokens", "llm_output_tokens", "llm_total_tokens", "wall_time_ms")
-RUNTIME_METRICS = ("task_success", "required_skill_recall", "stage_transition_success",
-                   "repeated_discovery_count", "bundle_reuse_count", "llm_total_tokens")
+PAIRED_METRICS = ("task_success", "required_skill_recall", "wrong_skill_count",
+                  "llm_input_tokens", "llm_output_tokens", "llm_total_tokens",
+                  "cached_tokens", "wall_time_ms", "total_tool_calls")
+RUNTIME_ONLY_PAIRED_METRICS = ("reroute_success", "new_required_skill_recall",
+                               "premature_activation_count")
 
 
 def _avg(rows: list[dict[str, Any]], metric: str) -> float | None:
@@ -17,7 +18,7 @@ def _avg(rows: list[dict[str, Any]], metric: str) -> float | None:
 
 
 def paired_report(rows: list[dict[str, Any]], suite: str) -> dict[str, Any]:
-    metrics = SCALING_METRICS if suite == "scaling" else RUNTIME_METRICS
+    metrics = PAIRED_METRICS if suite == "scaling" else PAIRED_METRICS + RUNTIME_ONLY_PAIRED_METRICS
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         if row["suite"] == suite:

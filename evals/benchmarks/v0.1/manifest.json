@@ -10,6 +10,12 @@
     "control-plane": {"pi_skills": false, "control_plane_adapter": true}
   },
   "shared_execution": {"same_prompt": true, "same_fixture": true, "same_model_provider": true, "same_tool_permissions": true, "max_turns": 20, "timeout_seconds": 300, "mid_run_human_correction": false},
+  "shared_tools": ["read", "write", "edit", "bash"],
+  "treatment_only_tools": ["load_capability", "apply_capability", "load_skill_body"],
+  "experiment_identity": {
+    "freeze_at_run_start": true,
+    "required": ["pi_package","pi_version","provider","model","reasoning_config","temperature","max_turns","timeout_seconds","corpus_version","corpus_subset","retrieval_card_identity","dense_index_identity","adapter_commit_sha"]
+  },
   "corpora": ["S32", "S64", "S128"],
   "scaling_matrix_cells": 96,
   "runtime_matrix_cells": 40,

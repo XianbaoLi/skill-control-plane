@@ -33,6 +33,9 @@ def main() -> int:
     run.add_argument("--arm", required=True, choices=("native", "control-plane"))
     run.add_argument("--corpus", required=True, choices=("S32", "S64", "S128"))
     run.add_argument("--model", default="benchmark-faux-1")
+    run.add_argument("--provider")
+    run.add_argument("--production", action="store_true",
+                     help="use the real configured Pi provider/model bridge")
     run.add_argument("--output", type=Path, required=True)
     run.add_argument("--bridge-command")
     report = sub.add_parser("report")
@@ -46,10 +49,15 @@ def main() -> int:
         print(json.dumps(paired_report(rows, args.suite), ensure_ascii=False, indent=2))
         return 0
     task = _task(args.task)
+    if args.production and not args.provider:
+        parser.error("--production requires --provider")
+    if args.production and args.model == "benchmark-faux-1":
+        parser.error("--production requires an explicit --model")
     fixtures = json.loads((BENCH / "fixtures.json").read_text(encoding="utf-8"))
     row = run_one(task=task, arm=args.arm, corpus=args.corpus, model=args.model,
                   fixture_spec=fixtures[task["fixture"]], output=args.output,
-                  command=resolve_bridge(args.bridge_command))
+                  command=resolve_bridge(args.bridge_command, production=args.production),
+                  provider=args.provider)
     print(json.dumps(row, ensure_ascii=False, indent=2))
     return 0
 

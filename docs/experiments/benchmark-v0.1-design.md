@@ -43,24 +43,24 @@ corpus categories; no task was selected from Retrieval Card wording.
 ## Runtime scenarios
 
 S128 is fixed. Single-skill scenarios are RT-S01..S06. Multi-skill scenarios are
-RT-M01..M05 and require 2–3 Skills. Stage transitions are RT-T01..T05; each fixture
-withholds its second failure until the first stage's checks advance. Reuse/session
+RT-M01..M05 and require 2–3 Skills. Dynamic reroutes are RT-T01..T05; each fixture
+withholds its second failure until the initial checks advance. Reuse/session
 scenarios are RT-R01..R04, each with two explicit turns and a resume instruction.
 
 | Kind | Count | Coverage |
 |---|---:|---|
 | single-skill | 6 | API contract, observability, Go, messaging, browser tests, retrieval |
 | multi-skill | 5 | service+browser, site+build+search, contract+retrieval, IaC+observability, requirements+training |
-| stage-transition | 5 | API→alerts, build→browser, retrieval→contract, IaC→Go helper, site→search |
+| dynamic-reroute | 5 | API→alerts, build→browser, retrieval→contract, IaC→Go helper, site→search |
 | reuse/session | 4 | API contract, alerts, browser page object, brand narrative |
 
-Only treatment has CREATE/EXTEND/reuse expectations. Scoring remains based on files,
-commands, stage evidence, and observed tool events.
+Only treatment has CREATE/EXTEND/reuse expectations. Reroute scoring uses ordered
+evidence and capability-activation events; the event gold is not a runtime abstraction.
 
 ## Leakage and validation
 
 `benchmark_validate.py` checks exact counts, S32/S64/S128 membership, legal required
-sets, stage-specific requirements and trigger evidence, multi-turn reuse shape, and
+sets, event-specific requirements and trigger evidence, multi-turn reuse shape, and
 case-insensitive token-boundary occurrences of every target/required Skill ID in the
 prompt. All 36 prompts pass. Target metadata remains in the gold manifest and is never
 placed in the user prompt.
@@ -69,9 +69,9 @@ placed in the user prompt.
 
 Each JSONL row records identity, boolean outcome with check details, required and
 activated Skills, recall, wrong activations, discovery/repeated-discovery/body-load
-counts, transition/Bundle/session fields, Pi input/output/cache usage, embedding call
+counts, reroute/Bundle/session fields, Pi input/output/cache usage, embedding call
 count, elapsed milliseconds, tool calls, and Control Plane retrieval telemetry.
-Native-only non-concepts are zero or null. `llm_total_tokens` is input plus output;
+Native non-concepts are null, never fabricated as zero. `llm_total_tokens` is input plus output;
 provider cache reads remain separately in `cached_tokens`.
 
 Online token data comes directly from every Pi assistant message's `usage` object
@@ -81,6 +81,13 @@ component scores but not standalone BM25/Dense ranks; those rank fields are ther
 null with `component_rank_status=unavailable-from-current-sidecar-trace`, never
 fabricated. A future telemetry-only adapter change may expose them without changing
 retrieval behavior.
+
+Embedding calls are instrumented at the embedding client boundary and split into the
+startup/readiness probe and runtime discovery calls. They are not inferred from
+`load_capability` calls. Bundle create/extend/reuse counts and retrieval/embedding-call
+diagnostics are Control Plane-only and are excluded from paired deltas. Each result
+also freezes Pi package/version, provider/model/reasoning/temperature, turn and timeout
+limits, corpus version/subset, retrieval artifact hashes, and repository commit SHA.
 
 Offline cost is a separate artifact schema. Retrieval Card records support model,
 input/output/total tokens, request/retry counts, and wall time. Dense records support
@@ -102,15 +109,21 @@ selected corpus, Retrieval Cards, and DenseIndex. This is the programmatic equiv
 of `pi --no-skills` plus the adapter.
 
 Only S128 has a separately materialized frozen retrieval artifact directory. For S32
-smoke startup, the bridge creates a temporary exact subset *view* under that run's
-working fixture by selecting unchanged S128 card lines and DenseIndex records for S32
-IDs. It neither writes nor regenerates the frozen artifacts.
+and S64, the bridge creates a temporary exact subset *view* under that run's working
+fixture by selecting unchanged S128 card lines and DenseIndex records. It neither
+writes nor regenerates the frozen artifacts.
 
-External query embedding was not approved because the smoke prompt would leave the
-machine. Consequently, the smoke-only sidecar substitutes a local zero query vector.
-The real Pi 0.84.1 session, tools, adapter, sidecar, Control Plane, frozen vectors, log,
-and scorer all execute; retrieval quality and the resulting token deltas are explicitly
-not benchmark evidence.
+The default bridge is deliberately an offline plumbing fixture: it substitutes a local
+zero query vector, uses a deterministic provider, and marks traces
+`not_benchmark_evidence=true`. The production bridge is selected explicitly with
+`--production`; it uses Pi's configured real provider plus the production embedding,
+Dense, BM25, and RRF path. It never selects a Skill or creates task output for the
+model.
+
+Reuse scenarios execute T1, run its success checks, emit Pi session shutdown, open the
+persisted session with `SessionManager.open`, restore Control Plane state through the
+adapter, then execute and check T2. Discovery, activation/body load, usage, and Bundle
+reuse are retained per turn.
 
 Smoke commands:
 
@@ -119,6 +132,6 @@ PYTHONPATH=src .venv/bin/python scripts/benchmark_run.py one --task SC-01 --arm 
 PYTHONPATH=src .venv/bin/python scripts/benchmark_run.py one --task SC-01 --arm control-plane --corpus S32 --output /tmp/scp-benchmark-smoke
 PYTHONPATH=src .venv/bin/python scripts/benchmark_run.py one --task RT-S04 --arm native --corpus S128 --output /tmp/scp-benchmark-smoke
 PYTHONPATH=src .venv/bin/python scripts/benchmark_run.py one --task RT-S04 --arm control-plane --corpus S128 --output /tmp/scp-benchmark-smoke
+PYTHONPATH=src .venv/bin/python scripts/benchmark_run.py one --task RT-T01 --arm control-plane --corpus S128 --output /tmp/scp-reroute-smoke
+PYTHONPATH=src .venv/bin/python scripts/benchmark_run.py one --task RT-R01 --arm control-plane --corpus S128 --output /tmp/scp-reuse-smoke
 ```
-
-All four smoke cells produced schema-valid logs and automatic `task_success=true`.
