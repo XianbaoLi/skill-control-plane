@@ -9,7 +9,7 @@ from skill_control_plane.evals.control_plane import (
 )
 from skill_control_plane.models import RetrievalCandidate, SkillRecord
 from skill_control_plane.discovery import candidate_union
-from skill_control_plane.runtime.bundles import (
+from skill_control_plane.evals.legacy.stage_bundles import (
     CapabilityShelf,
     GroupKey,
     build_capability_shelf,

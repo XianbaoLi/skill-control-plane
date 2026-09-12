@@ -8,11 +8,11 @@ from skill_control_plane.evals.control_plane import StageTransitionGoldCase
 from skill_control_plane.models import RetrievalCandidate
 from skill_control_plane.discovery import reciprocal_rank_fusion
 from skill_control_plane.discovery.base import Retriever
-from skill_control_plane.runtime.capability_facets import (
+from skill_control_plane.evals.legacy.capability_facets import (
     CapabilityFacetExtractor,
     extract_facet_queries,
 )
-from skill_control_plane.runtime.capability_need import (
+from skill_control_plane.evals.legacy.capability_need import (
     CapabilityNeedExtractor,
     extract_query,
 )

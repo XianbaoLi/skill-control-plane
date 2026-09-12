@@ -6,13 +6,13 @@ from skill_control_plane.evals.capability_facets import (
 )
 from skill_control_plane.evals.control_plane import StageGold, StageTransitionGoldCase
 from skill_control_plane.models import RetrievalCandidate
-from skill_control_plane.runtime.capability_facets import (
+from skill_control_plane.evals.legacy.capability_facets import (
     CapabilityFacets,
     LLMCapabilityFacetExtractor,
     build_capability_facets_prompt,
     extract_facet_queries,
 )
-from skill_control_plane.runtime.capability_need import CapabilityNeed
+from skill_control_plane.evals.legacy.capability_need import CapabilityNeed
 
 
 class MappingSearch:

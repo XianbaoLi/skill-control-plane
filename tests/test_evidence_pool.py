@@ -1,4 +1,4 @@
-from skill_control_plane.runtime.evidence import EvidencePool
+from skill_control_plane.evals.legacy.evidence import EvidencePool
 
 
 def test_evidence_pool_reuses_agent_interpretation_in_direct_retrieval_text() -> None:

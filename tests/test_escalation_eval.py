@@ -1,5 +1,5 @@
 from skill_control_plane.evals.escalation import summarize_retrieval_escalation
-from skill_control_plane.runtime.stage_retrieval import (
+from skill_control_plane.evals.legacy.stage_retrieval import (
     RetrievalPhase,
     RetrievalTrace,
     StageRetrievalResult,

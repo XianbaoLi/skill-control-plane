@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from skill_control_plane.runtime.llm_context import TextCompleter
+from skill_control_plane.evals.legacy.llm_context import TextCompleter
 
 
 @dataclass(frozen=True, slots=True)

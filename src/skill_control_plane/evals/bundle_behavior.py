@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 from skill_control_plane.discovery.discovery import SkillDiscovery
 from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
-from skill_control_plane.runtime.experimental_agent import ConversationClient, ExperimentalSkillAgent
+from skill_control_plane.integrations.reference_agent import ConversationClient, ExperimentalSkillAgent
 
 TASKS = (
     '请按本环境已有的文档处理操作规范，为团队建立持续复用的文档制作工作流：'

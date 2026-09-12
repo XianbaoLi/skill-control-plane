@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from skill_control_plane.models import SkillRecord
-from skill_control_plane.registry.bundles import Bundle, BundleRegistry
+from skill_control_plane.evals.legacy.bundle_registry import Bundle, BundleRegistry
 from skill_control_plane.discovery.discovery import SkillDiscovery, SkillDiscoveryResult
 
 

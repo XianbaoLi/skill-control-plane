@@ -36,6 +36,10 @@ class SkillRecord:
         return "\n".join(part for part in parts if part)
 
 
+# V1 entity name; SkillRecord remains as a compatible import for V0.x evals.
+Skill = SkillRecord
+
+
 @dataclass(frozen=True, slots=True)
 class RetrievalCandidate:
     skill_id: str

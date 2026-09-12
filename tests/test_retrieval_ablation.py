@@ -4,7 +4,7 @@ from skill_control_plane.evals.retrieval_ablation import (
     evaluate_frozen_query_retrieval_ablation,
 )
 from skill_control_plane.models import RetrievalCandidate
-from skill_control_plane.runtime.capability_need import CapabilityNeed
+from skill_control_plane.evals.legacy.capability_need import CapabilityNeed
 
 
 class MappingSearch:

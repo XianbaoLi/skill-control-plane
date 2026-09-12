@@ -17,7 +17,7 @@ import json
 from pathlib import Path
 
 from skill_control_plane.evals import load_stage_transition_gold
-from skill_control_plane.runtime.capability_need import (
+from skill_control_plane.evals.legacy.capability_need import (
     LLMCapabilityNeedExtractor,
     command_completer,
     extract_query,

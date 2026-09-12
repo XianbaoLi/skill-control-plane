@@ -7,8 +7,8 @@ from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.discovery import SkillDiscovery
 from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
-from skill_control_plane.runtime.capability_loading import ActiveBundle, RuntimeCapabilityState
-from skill_control_plane.runtime.experimental_agent import (
+from skill_control_plane.runtime.capability_memory import ActiveBundle, RuntimeCapabilityState
+from skill_control_plane.integrations.reference_agent import (
     EVICTED_BODY_TOMBSTONE, SUPERSEDED_BODY_TOMBSTONE,
     ExperimentalSkillAgent,
 )

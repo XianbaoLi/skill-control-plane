@@ -3,9 +3,9 @@ import inspect
 
 import pytest
 
-from skill_control_plane.runtime import soft_bundle
-from skill_control_plane.runtime.soft_bundle import SoftBundleRetriever, SoftBudget, explicit_priors
-from skill_control_plane.runtime.capability_need import CapabilityNeed
+from skill_control_plane.evals.legacy import soft_bundle
+from skill_control_plane.evals.legacy.soft_bundle import SoftBundleRetriever, SoftBudget, explicit_priors
+from skill_control_plane.evals.legacy.capability_need import CapabilityNeed
 from skill_control_plane.evals.soft_bundle import evaluate_soft_bundle_cases
 from skill_control_plane.evals.hierarchical import evaluate_hierarchical_cases
 from skill_control_plane.evals.control_plane import StageGold, StageTransitionGoldCase

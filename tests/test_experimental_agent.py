@@ -8,8 +8,8 @@ from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.discovery import SkillDiscovery
 from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
-from skill_control_plane.runtime.capability_loading import ActiveBundle, RuntimeCapabilityState
-from skill_control_plane.runtime.experimental_agent import (
+from skill_control_plane.runtime.capability_memory import ActiveBundle, RuntimeCapabilityState
+from skill_control_plane.integrations.reference_agent import (
     CAPABILITY_TOOLS, ExperimentalSkillAgent, AgentStepLimitError,
 )
 
@@ -235,11 +235,8 @@ def test_extend_requires_new_member_and_changes_only_target(harness):
 
 
 def test_no_independent_resolver_or_combined_loader(harness, monkeypatch):
-    from skill_control_plane.runtime import capability_loading
     def forbidden(*args, **kwargs):
         pytest.fail('independent resolver/combined loader must not run')
-    monkeypatch.setattr(capability_loading.LLMCapabilityResolver, '__init__', forbidden)
-    monkeypatch.setattr(capability_loading.RuntimeCapabilityLoader, 'load_capability', forbidden)
     monkeypatch.setattr(harness, 'load_capability', forbidden)
     ExperimentalSkillAgent(harness, ScriptedClient([load(), apply(), FINAL])).run('task')
 

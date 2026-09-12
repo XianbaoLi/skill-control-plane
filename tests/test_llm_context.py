@@ -1,5 +1,5 @@
-from skill_control_plane.runtime.evidence import EvidencePool
-from skill_control_plane.runtime.llm_context import (
+from skill_control_plane.evals.legacy.evidence import EvidencePool
+from skill_control_plane.evals.legacy.llm_context import (
     LLMStageContextEnhancer,
     build_src_prompt,
 )

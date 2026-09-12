@@ -5,7 +5,7 @@ import pytest
 from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.discovery import SkillDiscovery
-from skill_control_plane.runtime.capability_loading import (
+from skill_control_plane.evals.legacy.resolver_capability_loading import (
     ActiveBundle, CapabilityDecision, LLMCapabilityResolver, ResolverError,
     ResolverResult, RuntimeCapabilityLoader, RuntimeCapabilityState,
     build_resolver_prompt, validate_decision,
@@ -160,7 +160,7 @@ def test_extend_requires_new_skill(discovery):
 
 
 def test_default_resolver_reuses_existing_client(monkeypatch):
-    import skill_control_plane.runtime.capability_loading as runtime
+    import skill_control_plane.evals.legacy.resolver_capability_loading as runtime
     client = lambda prompt: '{}'
     monkeypatch.setattr(runtime, 'BigModelChatClient', lambda: client)
     assert runtime.LLMCapabilityResolver().complete is client

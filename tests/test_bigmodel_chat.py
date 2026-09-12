@@ -121,7 +121,7 @@ def test_complete_messages_sends_tools_and_preserves_full_assistant():
         return FakeResponse({'choices': [{'message': message}],
                              'usage': {'prompt_tokens': 123, 'completion_tokens': 7}})
     client = BigModelChatClient(api_key='test', urlopen_fn=fake_urlopen)
-    from skill_control_plane.runtime.experimental_agent import CAPABILITY_TOOLS
+    from skill_control_plane.integrations.reference_agent import CAPABILITY_TOOLS
     messages = [{'role': 'system', 'content': 'agent rules'},
                 {'role': 'user', 'content': 'original task'}]
     assert client.complete_messages(messages, tools=CAPABILITY_TOOLS) == message

@@ -16,7 +16,7 @@ from skill_control_plane.discovery.bigmodel import (
 )
 from skill_control_plane.discovery.cards import load_retrieval_cards
 from skill_control_plane.discovery.discovery import SkillDiscovery
-from skill_control_plane.runtime.capability_loading import (
+from skill_control_plane.evals.legacy.resolver_capability_loading import (
     ActiveBundle, LLMCapabilityResolver, ResolverError, RuntimeCapabilityLoader,
     RuntimeCapabilityState,
 )

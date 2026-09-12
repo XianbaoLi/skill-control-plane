@@ -11,11 +11,11 @@ from skill_control_plane.evals.hierarchical import (
     print_capability_need_report,
 )
 from skill_control_plane.models import RetrievalCandidate, SkillRecord
-from skill_control_plane.runtime.capability_need import (
+from skill_control_plane.evals.legacy.capability_need import (
     CapabilityNeed, LLMCapabilityNeedExtractor, build_capability_need_prompt,
     command_completer, extract_query,
 )
-from skill_control_plane.runtime.hierarchical import ShelfAwareRetriever
+from skill_control_plane.evals.legacy.hierarchical import ShelfAwareRetriever
 
 
 class Search:

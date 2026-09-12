@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from skill_control_plane.runtime.evidence import EvidencePool
-from skill_control_plane.runtime.stage_retrieval import StageRetrievalContext
+from skill_control_plane.evals.legacy.evidence import EvidencePool
+from skill_control_plane.evals.legacy.stage_retrieval import StageRetrievalContext
 
 
 TextCompleter = Callable[[str], str]

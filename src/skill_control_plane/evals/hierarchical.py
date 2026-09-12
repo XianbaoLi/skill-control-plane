@@ -7,13 +7,13 @@ from typing import Any
 from skill_control_plane.evals.bundles import evaluate_bundle_trajectory
 from skill_control_plane.evals.control_plane import StageTransitionGoldCase
 from skill_control_plane.models import SkillRecord
-from skill_control_plane.runtime.bundles import (
+from skill_control_plane.evals.legacy.stage_bundles import (
     CapabilityShelf, build_capability_shelf, integrate_retrieval_delta,
     default_group_key,
 )
-from skill_control_plane.runtime.hierarchical import ShelfAwareRetriever, RetrieverFactory
+from skill_control_plane.evals.legacy.hierarchical import ShelfAwareRetriever, RetrieverFactory
 from skill_control_plane.discovery.base import Retriever
-from skill_control_plane.runtime.capability_need import CapabilityNeedExtractor, extract_query
+from skill_control_plane.evals.legacy.capability_need import CapabilityNeedExtractor, extract_query
 
 
 def evaluate_hierarchical_cases(

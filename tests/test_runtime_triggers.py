@@ -1,5 +1,5 @@
 from skill_control_plane.models import TaskState
-from skill_control_plane.runtime import RerouteTrigger, detect_reroute_trigger
+from skill_control_plane.evals.legacy.triggers import RerouteTrigger, detect_reroute_trigger
 
 
 def test_failure_has_highest_priority() -> None:

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from skill_control_plane.models import RetrievalCandidate
-from skill_control_plane.runtime.evidence import EvidencePool
-from skill_control_plane.runtime.stage_retrieval import (
+from skill_control_plane.evals.legacy.evidence import EvidencePool
+from skill_control_plane.evals.legacy.stage_retrieval import (
     RetrievalPhase,
     StageRetrievalContext,
     retrieve_for_stage,

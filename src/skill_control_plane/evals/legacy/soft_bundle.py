@@ -6,8 +6,8 @@ from dataclasses import dataclass, replace
 from itertools import zip_longest
 
 from skill_control_plane.discovery import BM25Retriever, candidate_union
-from skill_control_plane.runtime.bundles import default_group_key
-from skill_control_plane.runtime.capability_need import extract_query
+from skill_control_plane.evals.legacy.stage_bundles import default_group_key
+from skill_control_plane.evals.legacy.capability_need import extract_query
 
 # Ordered, deliberately narrow indicators; ambiguous CI failure emits no prior.
 PRIOR_RULES = (

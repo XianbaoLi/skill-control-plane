@@ -3,8 +3,8 @@ import pytest
 from skill_control_plane.evals.control_plane import StageGold, StageTransitionGoldCase
 from skill_control_plane.evals.hierarchical import evaluate_hierarchical_cases
 from skill_control_plane.models import RetrievalCandidate, SkillRecord
-from skill_control_plane.runtime.bundles import build_capability_shelf, integrate_retrieval_delta
-from skill_control_plane.runtime.hierarchical import ShelfAwareRetriever
+from skill_control_plane.evals.legacy.stage_bundles import build_capability_shelf, integrate_retrieval_delta
+from skill_control_plane.evals.legacy.hierarchical import ShelfAwareRetriever
 
 
 def record(skill_id, category):
@@ -128,7 +128,7 @@ def test_ab_global_arm_preserves_existing_evaluator():
 
 def test_dense_matcher_uses_only_registered_metadata_and_reuses_encoder():
     from skill_control_plane.discovery.dense import DenseRetriever
-    from skill_control_plane.runtime.hierarchical import dense_factory_for
+    from skill_control_plane.evals.legacy.hierarchical import dense_factory_for
     records = {r.skill_id: r for r in [record('known', 'code'), record('debug', 'code'), record('mail', 'email')]}
     class Encoder:
         def __init__(self):

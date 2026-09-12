@@ -1,27 +1,29 @@
-"""Skill Control Plane public API."""
+"""Skill Control Plane V1 public API."""
 
-from .capability_loading import CapabilityLoader, CapabilityResult, Decision, load_capability, resolve_bundle
-from .registry.bundles import Bundle, BundleRegistry
-from .discovery.discovery import SkillDiscovery, SkillDiscoveryResult, discover_skills
-
-from .models import (
-    EvolutionAction,
-    EvolutionDecision,
-    Experience,
-    Relation,
-    RetrievalCandidate,
-    SkillRecord,
-    TaskState,
+from .discovery import SkillDiscovery, SkillDiscoveryResult, discover_skills
+from .models import RetrievalCandidate, Skill, SkillRecord
+from .registry import SkillRegistry, SkillStore, load_skill_tree
+from .runtime import (
+    ActiveBundle,
+    CapabilityMemory,
+    DiscoverySession,
+    RuntimeCapabilityHarness,
+    RuntimeCapabilityState,
 )
 
 __all__ = [
-    "CapabilityLoader", "CapabilityResult", "Decision", "load_capability", "resolve_bundle",
-    "Bundle", "BundleRegistry", "SkillDiscovery", "SkillDiscoveryResult", "discover_skills",
-    "EvolutionAction",
-    "EvolutionDecision",
-    "Experience",
-    "Relation",
+    "ActiveBundle",
+    "CapabilityMemory",
+    "DiscoverySession",
     "RetrievalCandidate",
+    "RuntimeCapabilityHarness",
+    "RuntimeCapabilityState",
+    "Skill",
+    "SkillDiscovery",
+    "SkillDiscoveryResult",
     "SkillRecord",
-    "TaskState",
+    "SkillRegistry",
+    "SkillStore",
+    "discover_skills",
+    "load_skill_tree",
 ]

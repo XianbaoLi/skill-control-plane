@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from collections.abc import Iterable
 from types import MappingProxyType
 
-from .store import SkillRegistry
+from skill_control_plane.registry import SkillRegistry
 
 
 @dataclass(frozen=True)

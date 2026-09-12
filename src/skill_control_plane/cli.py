@@ -811,7 +811,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "corpus" and args.corpus_command == "retrieval-cards":
-        from skill_control_plane.runtime.capability_need import command_completer
+        from skill_control_plane.evals.legacy.capability_need import command_completer
 
         skills = load_skill_tree(args.root)
         try:
@@ -917,13 +917,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         extra = {}
         if args.hierarchical_ab:
             from skill_control_plane.evals.hierarchical import evaluate_hierarchical_cases
-            from skill_control_plane.runtime.hierarchical import dense_factory_for
+            from skill_control_plane.evals.legacy.hierarchical import dense_factory_for
             evaluator = evaluate_hierarchical_cases
             extra = {"dense_factory": dense_factory_for(dense)}
         if args.capability_need_ab:
             from skill_control_plane.evals.hierarchical import evaluate_capability_need_cases
-            from skill_control_plane.runtime.hierarchical import dense_factory_for
-            from skill_control_plane.runtime.capability_need import (
+            from skill_control_plane.evals.legacy.hierarchical import dense_factory_for
+            from skill_control_plane.evals.legacy.capability_need import (
                 LLMCapabilityNeedExtractor, command_completer,
             )
             evaluator = evaluate_capability_need_cases
@@ -932,11 +932,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                          command_completer(args.capability_need_command))}
         if args.soft_bundle_ab or args.soft_bundle_repair_ab:
             from skill_control_plane.evals.soft_bundle import evaluate_soft_bundle_cases
-            from skill_control_plane.runtime.hierarchical import dense_factory_for
+            from skill_control_plane.evals.legacy.hierarchical import dense_factory_for
             evaluator = evaluate_soft_bundle_cases
             extra = {"dense_factory": dense_factory_for(dense)}
             if args.soft_bundle_repair_ab:
-                from skill_control_plane.runtime.capability_need import LLMCapabilityNeedExtractor, command_completer
+                from skill_control_plane.evals.legacy.capability_need import LLMCapabilityNeedExtractor, command_completer
                 extra["extractor"] = LLMCapabilityNeedExtractor(command_completer(args.capability_need_command))
         report = evaluator(
             stage_cases,
@@ -973,10 +973,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             bm25, dense = _build_retrievers(args.root, args.dense_model)
 
-        from skill_control_plane.runtime.capability_facets import (
+        from skill_control_plane.evals.legacy.capability_facets import (
             LLMCapabilityFacetExtractor,
         )
-        from skill_control_plane.runtime.capability_need import (
+        from skill_control_plane.evals.legacy.capability_need import (
             LLMCapabilityNeedExtractor,
             command_completer,
         )
@@ -1030,7 +1030,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             dense = DenseRetriever(indexed_skills, model_name=args.dense_model)
 
-        from skill_control_plane.runtime.capability_need import (
+        from skill_control_plane.evals.legacy.capability_need import (
             LLMCapabilityNeedExtractor,
             command_completer,
         )
@@ -1064,7 +1064,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             allow_small_sample=args.allow_small_sample,
         )
 
-        from skill_control_plane.runtime.capability_need import (
+        from skill_control_plane.evals.legacy.capability_need import (
             LLMCapabilityNeedExtractor,
             command_completer,
         )
@@ -1133,7 +1133,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         from skill_control_plane.evals.query_robustness import (
             load_query_variant_sets,
         )
-        from skill_control_plane.runtime.capability_need import (
+        from skill_control_plane.evals.legacy.capability_need import (
             LLMCapabilityNeedExtractor,
             command_completer,
         )

@@ -8,7 +8,7 @@ from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.discovery import SkillDiscovery
 from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
-from skill_control_plane.runtime.experimental_agent import CAPABILITY_TOOLS, ExperimentalSkillAgent
+from skill_control_plane.integrations.reference_agent import CAPABILITY_TOOLS, ExperimentalSkillAgent
 
 
 def tool(name, arguments):

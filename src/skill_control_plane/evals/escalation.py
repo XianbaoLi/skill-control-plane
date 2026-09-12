@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from skill_control_plane.runtime.stage_retrieval import (
+from skill_control_plane.evals.legacy.stage_retrieval import (
     RetrievalPhase,
     StageRetrievalResult,
 )

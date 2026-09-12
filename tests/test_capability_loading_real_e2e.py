@@ -8,7 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from skill_control_plane import Bundle, BundleRegistry, CapabilityLoader, SkillDiscovery
+from skill_control_plane.discovery import SkillDiscovery
+from skill_control_plane.evals.legacy.bundle_registry import Bundle, BundleRegistry
+from skill_control_plane.evals.legacy.deterministic_capability_loading import CapabilityLoader
 from skill_control_plane.cli import _validate_root_snapshot
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.bigmodel import BigModelDenseRetriever

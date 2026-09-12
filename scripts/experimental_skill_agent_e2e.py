@@ -15,7 +15,7 @@ from skill_control_plane.discovery.bigmodel import BigModelDenseRetriever, BigMo
 from skill_control_plane.discovery.cards import load_retrieval_cards
 from skill_control_plane.discovery.discovery import SkillDiscovery
 from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
-from skill_control_plane.runtime.experimental_agent import ExperimentalSkillAgent
+from skill_control_plane.integrations.reference_agent import ExperimentalSkillAgent
 
 ROOT = Path('local_artifacts/v0.5/hermes-current87')
 MANIFEST = Path('local_artifacts/v0.5/hermes-current87-manifest.json')

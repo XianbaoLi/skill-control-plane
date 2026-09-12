@@ -2,11 +2,11 @@
 from dataclasses import asdict
 
 from skill_control_plane.evals.hierarchical import evaluate_hierarchical_cases
-from skill_control_plane.runtime.bundles import (
+from skill_control_plane.evals.legacy.stage_bundles import (
     CapabilityShelf, build_capability_shelf, integrate_retrieval_delta, default_group_key,
 )
-from skill_control_plane.runtime.hierarchical import ShelfAwareRetriever
-from skill_control_plane.runtime.soft_bundle import SoftBundleRetriever, SoftBudget
+from skill_control_plane.evals.legacy.hierarchical import ShelfAwareRetriever
+from skill_control_plane.evals.legacy.soft_bundle import SoftBundleRetriever, SoftBudget
 
 
 def active(shelf):

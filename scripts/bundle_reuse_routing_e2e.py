@@ -13,7 +13,7 @@ from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.discovery.cards import load_retrieval_cards
 from skill_control_plane.discovery.discovery import SkillDiscovery
 from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
-from skill_control_plane.runtime.experimental_agent import (
+from skill_control_plane.integrations.reference_agent import (
     AGENT_INSTRUCTIONS, ExperimentalSkillAgent,
 )
 

@@ -2,12 +2,12 @@ import json
 
 import pytest
 
-from skill_control_plane.capability_loading import (
+from skill_control_plane.evals.legacy.deterministic_capability_loading import (
     CapabilityLoader, Decision, load_capability, resolve_bundle,
 )
 from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillRegistry
-from skill_control_plane.registry.bundles import Bundle, BundleRegistry
+from skill_control_plane.evals.legacy.bundle_registry import Bundle, BundleRegistry
 from skill_control_plane.discovery.cards import RetrievalCard, apply_retrieval_cards
 from skill_control_plane.discovery.dense import DenseRetriever, metadata_text
 from skill_control_plane.discovery.discovery import SkillDiscovery, discover_skills

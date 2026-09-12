@@ -1,4 +1,4 @@
-"""A bounded native-tool experiment with one model and one conversation history."""
+"""Reference native-tool integration; Core state remains in runtime modules."""
 from __future__ import annotations
 
 import json
@@ -6,8 +6,8 @@ from copy import deepcopy
 from dataclasses import asdict
 from typing import Protocol
 
-from .capability_harness import RuntimeCapabilityHarness
-from .capability_loading import _strict_object
+from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
+from skill_control_plane.runtime.discovery_session import _strict_object
 
 
 class ConversationClient(Protocol):
@@ -136,7 +136,7 @@ you MUST call load_skill_body(skill_id) before answering. Bundle metadata is not
 sufficient to skip this reload. Never rely on or quote the old body.'''
 
 
-class ExperimentalSkillAgent:
+class ReferenceSkillAgent:
     def __init__(self, harness: RuntimeCapabilityHarness, client: ConversationClient,
                  *, max_steps: int = 8,
                  require_evicted_body_reload: bool = False):
@@ -280,30 +280,7 @@ class ExperimentalSkillAgent:
             outcome = 'resident_reuse'
         else:
             outcome = 'no_capability_action'
-        successful_searches = [event for row in self.trace
-                               for event in row['tool_executions']
-                               if event['tool'] == 'load_capability'
-                               and 'model_visible_payload' in event]
-        applications = [event for row in self.trace
-                        for event in row['tool_executions']
-                        if event['tool'] == 'apply_capability'
-                        and 'remaining_gaps' in event]
-        discovery_events = [event for row in self.trace
-                            for event in row['tool_executions']
-                            if ((event['tool'] == 'load_capability'
-                                 and 'model_visible_payload' in event)
-                                or (event['tool'] == 'apply_capability'
-                                    and 'remaining_gaps' in event))]
-        last_discovery_event = discovery_events[-1] if discovery_events else None
-        if last_discovery_event and last_discovery_event['tool'] == 'apply_capability':
-            unresolved_gaps = last_discovery_event['remaining_gaps']
-            sufficiency = 'UNSATISFIED' if unresolved_gaps else 'COVERED'
-        elif successful_searches:
-            sufficiency = 'UNSATISFIED'
-            unresolved_gaps = [successful_searches[-1]['arguments']['need']]
-        else:
-            sufficiency = 'COVERED'
-            unresolved_gaps = []
+        session_audit = self.harness.discovery_session.audit()
         self.turn_audit.update({
             'bundle_state_after': json.loads(
                 self.harness.render_bundle_context())['maintained_bundles'],
@@ -313,24 +290,7 @@ class ExperimentalSkillAgent:
                            for event in row['tool_executions']],
             'retrieval_call_count_after': self.harness.retrieval_call_count,
             'body_load_count_after': self.harness.body_load_count,
-            'search_count': self.harness.turn_search_count,
-            'search_attempt_count': self.harness.turn_search_attempt_count,
-            'repeated_search_count': self.harness.turn_repeated_search_count,
-            'no_progress_search_count': self.harness.turn_no_progress_count,
-            'search_budget_hits': self.harness.turn_search_budget_hits,
-            'search_needs': list(self.harness.turn_search_needs),
-            'apply_count': len(applications),
-            'capability_sufficiency_outcome': sufficiency,
-            'sufficiency_transitions': [
-                ('SEARCH_MORE' if event['tool'] == 'load_capability'
-                 else ('UNSATISFIED' if event['remaining_gaps'] else 'COVERED'))
-                for row in self.trace
-                for event in row['tool_executions']
-                if ((event['tool'] == 'load_capability'
-                     and 'model_visible_payload' in event)
-                    or (event['tool'] == 'apply_capability'
-                        and 'remaining_gaps' in event))],
-            'unresolved_gaps': list(unresolved_gaps),
+            **session_audit,
             'load_capability_called': load_capability_called,
             'load_skill_body_called': load_skill_body_called,
             'bundle_reuse_outcome': outcome,
@@ -470,3 +430,8 @@ class ExperimentalSkillAgent:
                 row['turn_audit'] = deepcopy(self.turn_audit)
         self.trace[-1]['error'] = {'type': 'AgentStepLimitError'}
         raise AgentStepLimitError(f'agent exceeded {self.max_steps} model steps')
+
+
+# Historical name retained for experiment scripts; this class is an integration,
+# not a home for Core runtime state.
+ExperimentalSkillAgent = ReferenceSkillAgent

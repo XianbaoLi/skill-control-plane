@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from skill_control_plane.models import RetrievalCandidate, SkillRecord
-from skill_control_plane.runtime.bundles import (
+from skill_control_plane.evals.legacy.stage_bundles import (
     build_capability_shelf,
     integrate_retrieval_delta,
 )
