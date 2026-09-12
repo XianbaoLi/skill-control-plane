@@ -73,7 +73,13 @@ class ScriptedConversation:
                 action['purpose'] = 'Software diagnosis'
             elif self.unrelated == 'EXTEND':
                 action['target_bundle_id'] = doc['bundle_id']
-        return native('apply_capability', {'reason': 'Scripted test decision', **action})
+        coverage = [
+            {'need': f'use {skill_id}', 'covered_by': f'skill:{skill_id}'}
+            for skill_id in action['skill_ids']
+        ]
+        return native('apply_capability', {
+            'reason': 'Scripted test decision', 'coverage': coverage,
+            'remaining_gaps': [], **action})
 
 
 @pytest.mark.parametrize('unrelated', ['DIRECT', 'CREATE'])
@@ -107,7 +113,7 @@ def test_four_turns_preserve_history_extend_related_and_separate_unrelated(disco
     turn_three_surface = report['turns'][2]['system_bundle_metadata'][-1]
     assert 'xlsx' in {m['skill_id'] for m in turn_three_surface[0]['members']}
     payload = report['turns'][2]['retrieval_results'][0]
-    assert set(payload) == {'query', 'candidates'}
+    assert set(payload) == {'query', 'candidates', 'search_control'}
     assert all(set(c) == {'skill_id', 'name', 'description', 'rank', 'minimal_evidence'}
                for c in payload['candidates'])
     assert checkpoints[-1]['status'] == 'completed'

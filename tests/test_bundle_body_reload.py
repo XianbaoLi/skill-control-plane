@@ -47,6 +47,9 @@ def create_powerpoint(harness):
         'action': 'CREATE', 'skill_ids': ['powerpoint'],
         'reason': 'maintain the presentation workflow',
         'purpose': 'Create and revise the document presentation',
+        'coverage': [{'need': 'presentation work',
+                      'covered_by': 'skill:powerpoint'}],
+        'remaining_gaps': [],
     }))
 
 
@@ -143,6 +146,9 @@ def test_same_agent_second_turn_exact_reload_has_zero_retrieval(harness, monkeyp
             'action': 'CREATE', 'skill_ids': ['powerpoint'],
             'reason': 'reusable presentation work',
             'purpose': 'Create and revise the document presentation',
+            'coverage': [{'need': 'presentation work',
+                          'covered_by': 'skill:powerpoint'}],
+            'remaining_gaps': [],
         })
 
     def reload_from_evicted_bundle(messages):

@@ -35,7 +35,17 @@ def load(need='extract PDF text and presentation slides'):
 
 
 def apply(action='DIRECT', **kwargs):
-    return tool('apply_capability', {'action': action, 'skill_ids': ['pdf'], 'reason': 'task need', **kwargs})
+    skill_ids = kwargs.get('skill_ids', ['pdf'])
+    audited = {
+        'coverage': [
+            {'need': f'use {skill_id}', 'covered_by': f'skill:{skill_id}'}
+            for skill_id in dict.fromkeys(skill_ids)
+        ],
+        'remaining_gaps': [],
+    }
+    return tool('apply_capability', {
+        'action': action, 'skill_ids': ['pdf'], 'reason': 'task need',
+        **audited, **kwargs})
 
 
 FINAL = {'role': 'assistant', 'content': 'Task guidance complete. Quotes "and"\nnewlines are ordinary text.'}
@@ -63,7 +73,7 @@ def test_native_search_apply_bodies_history_and_bundle_surface(harness, action):
         assert messages[-1]['tool_call_id'] == messages[-2]['tool_calls'][0]['id']
         result = json.loads(messages[-1]['content'])
         assert {c['skill_id'] for c in result['candidates']} == {'pdf', 'slides'}
-        assert set(result) == {'query', 'candidates'}
+        assert set(result) == {'query', 'candidates', 'search_control'}
         assert all(set(c) == {'skill_id', 'name', 'description', 'rank',
                               'minimal_evidence'} for c in result['candidates'])
         kwargs = {'purpose': 'Documents'} if action == 'CREATE' else {}
@@ -122,7 +132,11 @@ def test_merged_candidates_and_single_use(harness):
     assert [c.skill_id for c in first.candidates] == ['pdf']
     assert [c.skill_id for c in second.candidates] == ['mail']
     assert {c.skill_id for c in harness.pending_candidates.candidates} == {'pdf', 'mail'}
-    decision = {'action': 'DIRECT', 'skill_ids': ['pdf', 'mail'], 'reason': 'x'}
+    decision = {'action': 'DIRECT', 'skill_ids': ['pdf', 'mail'], 'reason': 'x',
+                'coverage': [
+                    {'need': 'PDF', 'covered_by': 'skill:pdf'},
+                    {'need': 'mail', 'covered_by': 'skill:mail'}],
+                'remaining_gaps': []}
     harness.apply_capability(json.dumps(decision))
     assert harness.state.direct_skills == {'pdf', 'mail'}
     assert harness.pending_candidates is None
@@ -238,13 +252,19 @@ def test_failed_new_search_preserves_previous_candidates(harness, monkeypatch):
     with pytest.raises(RuntimeError):
         harness.search_capability('email')
     assert harness.pending_candidates is previous
-    harness.apply_capability(json.dumps({'action': 'DIRECT', 'skill_ids': ['pdf'], 'reason': 'x'}))
+    harness.apply_capability(json.dumps({
+        'action': 'DIRECT', 'skill_ids': ['pdf'], 'reason': 'x',
+        'coverage': [{'need': 'PDF', 'covered_by': 'skill:pdf'}],
+        'remaining_gaps': []}))
 
 
 def test_empty_search_cannot_apply(harness):
     assert not harness.search_capability('zzzznonexistent').candidates
     with pytest.raises(ValueError, match='outside supplied'):
-        harness.apply_capability(json.dumps({'action': 'DIRECT', 'skill_ids': ['pdf'], 'reason': 'x'}))
+        harness.apply_capability(json.dumps({
+            'action': 'DIRECT', 'skill_ids': ['pdf'], 'reason': 'x',
+            'coverage': [{'need': 'PDF', 'covered_by': 'skill:pdf'}],
+            'remaining_gaps': []}))
 
 
 def test_bundle_surface_uses_member_metadata_only(harness):
@@ -259,8 +279,8 @@ def test_bundle_surface_uses_member_metadata_only(harness):
     assert [b['bundle_id'] for b in data['maintained_bundles']] == ['a', 'z']
     member = data['maintained_bundles'][1]['members'][0]
     assert member['name'] == 'PDF'
-    assert member['short_description'].startswith('extract PDF text detail')
-    assert len(member['short_description']) == 240
+    assert set(member) == {'skill_id', 'name', 'body_state'}
+    assert 'short_description' not in surface
     assert all(s not in surface for s in ['SECRET_CARD', 'BODY_', 'hidden'])
 
 
@@ -312,8 +332,10 @@ def test_duplicate_call_ids_rejected_before_history_append(harness):
 
 def test_native_schema_required_fields_and_action_enum():
     schema = CAPABILITY_TOOLS[1]['function']['parameters']
-    assert set(schema['required']) == {'action', 'skill_ids', 'reason'}
+    assert set(schema['required']) == {
+        'action', 'skill_ids', 'reason', 'coverage', 'remaining_gaps'}
     assert schema['properties']['action']['enum'] == ['DIRECT', 'EXTEND', 'CREATE']
+    assert 'sufficiency' not in schema['properties']
     assert {'target_bundle_id', 'purpose'} <= schema['properties'].keys()
 
 
@@ -384,7 +406,10 @@ def test_second_search_provider_failure_can_recover_in_same_agent(harness, monke
 
 
 def test_missing_reason_preserves_pool_for_retry(harness):
-    missing = tool('apply_capability', {'action': 'DIRECT', 'skill_ids': ['pdf']})
+    missing = tool('apply_capability', {
+        'action': 'DIRECT', 'skill_ids': ['pdf'],
+        'coverage': [{'need': 'PDF', 'covered_by': 'skill:pdf'}],
+        'remaining_gaps': []})
     agent = ExperimentalSkillAgent(harness, ScriptedClient([load('PDF'), missing, apply(), FINAL]))
     agent.run('task')
     assert agent.trace[1]['tool_error']['type'] == 'ValueError'

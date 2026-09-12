@@ -42,6 +42,19 @@ class SkillRegistry:
             return ()
         return tuple((*card.capabilities, *card.use_when))
 
+    def bundle_capability_phrases(self, skill_id: str) -> tuple[str, ...]:
+        """One prioritized coverage representation for a compact Bundle card."""
+
+        record = self.get(skill_id)
+        card = self._retrieval_cards.get(skill_id)
+        if card is not None:
+            if card.capabilities:
+                return tuple(card.capabilities)
+            if card.use_when:
+                return tuple(card.use_when)
+        description = ' '.join(record.description.split()).strip()
+        return (description,) if description else ()
+
     def values(self) -> tuple[SkillRecord, ...]:
         return tuple(self._skills.values())
 

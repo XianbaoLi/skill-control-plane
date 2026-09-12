@@ -47,6 +47,11 @@ class SkillDiscovery:
 
         return self.registry.capability_phrases(skill_id)
 
+    def bundle_capability_phrases(self, skill_id: str) -> tuple[str, ...]:
+        """Expose the prioritized compact Bundle representation without searching."""
+
+        return self.registry.bundle_capability_phrases(skill_id)
+
     def discover_skills(self, query: str, k: int = 5) -> SkillDiscoveryResult:
         if not query.strip() or k < 1:
             raise ValueError("query must be non-empty and k must be positive")

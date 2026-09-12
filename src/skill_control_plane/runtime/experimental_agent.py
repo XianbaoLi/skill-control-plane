@@ -17,7 +17,7 @@ class ConversationClient(Protocol):
 CAPABILITY_TOOLS = [
     {'type': 'function', 'function': {
         'name': 'load_capability',
-        'description': 'Search missing capabilities for the next step; returns candidates, not loaded instructions.',
+        'description': 'Search one explicit residual capability gap for the next step; maximum three calls per user turn. Returns candidates, not loaded instructions.',
         'parameters': {'type': 'object', 'properties': {
             'need': {'type': 'string', 'minLength': 1,
                      'description': 'Describe the missing capability, not a Skill name, Bundle name or catalog ID.'}},
@@ -29,9 +29,18 @@ CAPABILITY_TOOLS = [
             'action': {'type': 'string', 'enum': ['DIRECT', 'EXTEND', 'CREATE']},
             'skill_ids': {'type': 'array', 'minItems': 1, 'items': {'type': 'string'}},
             'reason': {'type': 'string', 'minLength': 1},
+            'coverage': {'type': 'array', 'items': {'type': 'object',
+                'properties': {
+                    'need': {'type': 'string', 'minLength': 1},
+                    'covered_by': {'type': 'string', 'minLength': 1}},
+                'required': ['need', 'covered_by'], 'additionalProperties': False}},
+            'remaining_gaps': {'type': 'array',
+                               'items': {'type': 'string', 'minLength': 1}},
             'target_bundle_id': {'type': 'string', 'description': 'Required only for EXTEND.'},
             'purpose': {'type': 'string', 'description': 'Required only for CREATE.'}},
-            'required': ['action', 'skill_ids', 'reason'], 'additionalProperties': False}}},
+            'required': ['action', 'skill_ids', 'reason', 'coverage',
+                         'remaining_gaps'],
+            'additionalProperties': False}}},
     {'type': 'function', 'function': {
         'name': 'load_skill_body',
         'description': 'Exactly reload the full body of an evicted Skill already in a current Bundle. Does not search.',
@@ -45,10 +54,14 @@ Before calling load_capability:
 1. Inspect Runtime Bundles first.
 2. Compare the next concrete task requirement against each Bundle's purpose,
    capabilities, and member Skill metadata.
-3. If a Bundle covers the requirement, follow the Runtime Body Policy: reuse a
+3. Call load_capability only for an explicit capability gap: the next concrete
+   step is not covered, a new subgoal needs a new capability, or failure evidence
+   specifically shows a missing capability.
+4. If a Bundle covers the requirement, follow the Runtime Body Policy: reuse a
    resident body, or decide from Bundle metadata whether an evicted body needs
    exact reload.
-4. Only call load_capability for the residual capability gap no Bundle covers.
+5. Otherwise continue without discovery. A Skill being possibly useful is not a
+   trigger, and new wording is not a new capability.
 
 Never rediscover an existing Bundle capability. New user wording does not imply
 a new capability. Continuing, editing, revising, or retrying work that uses the
@@ -57,6 +70,19 @@ ONLY the uncovered capability gap, not capabilities already covered by Bundles.
 After candidates are returned, decide whether they should be loaded DIRECT, used
 to EXTEND an existing maintained bundle, or form a new CREATE bundle. Do not load
 skills merely because they might be useful.
+
+During discovery, explicitly reason about required needs minus coverage from
+current Bundles and pending candidates. Sufficiency is inferred from behavior:
+- If a clear residual gap and a new meaningful search direction remain, call
+  load_capability with only that residual gap (SEARCH_MORE).
+- If Bundle plus credible pending candidates cover the current step, apply with
+  remaining_gaps empty (COVERED).
+- If the library has no credible candidate or further search is not worthwhile,
+  stop discovery and state the remaining gap (UNSATISFIED).
+Precision of commitment is more important than artificial full coverage. Never
+select a weak or unrelated Skill to make remaining_gaps empty. A user turn allows
+at most three load_capability calls. If search_control reports no meaningful new
+candidates, do not repeat the search; use credible candidates or abstain.
 
 Use the provided function tools when needed. Otherwise answer the user normally.
 For each maintained Bundle member, the latest system metadata reports the
@@ -68,6 +94,11 @@ Read each result before calling apply_capability. You may search again when
 another capability is needed. Select only candidate skill IDs retrieved in this
 user turn since the last successful apply. Successful apply consumes that pool;
 failed apply preserves it for correction. DIRECT may select multiple skills for a one-off need.
+When applying, coverage must map each required need to bundle:<bundle_id> or a
+selected skill:<skill_id>. Set remaining_gaps to unresolved needs. An empty list
+means committed coverage is complete. A non-empty list commits only credible
+partial coverage and preserves an UNSATISFIED residual. If another meaningful
+search direction remains, search that residual gap before applying.
 EXTEND must add at least one new skill to a current maintained bundle.
 CREATE maintains a new capability cluster with a reusable purpose. Skill count
 and retrieval rank do not decide the action. Select relevant candidates only.
@@ -249,6 +280,30 @@ class ExperimentalSkillAgent:
             outcome = 'resident_reuse'
         else:
             outcome = 'no_capability_action'
+        successful_searches = [event for row in self.trace
+                               for event in row['tool_executions']
+                               if event['tool'] == 'load_capability'
+                               and 'model_visible_payload' in event]
+        applications = [event for row in self.trace
+                        for event in row['tool_executions']
+                        if event['tool'] == 'apply_capability'
+                        and 'remaining_gaps' in event]
+        discovery_events = [event for row in self.trace
+                            for event in row['tool_executions']
+                            if ((event['tool'] == 'load_capability'
+                                 and 'model_visible_payload' in event)
+                                or (event['tool'] == 'apply_capability'
+                                    and 'remaining_gaps' in event))]
+        last_discovery_event = discovery_events[-1] if discovery_events else None
+        if last_discovery_event and last_discovery_event['tool'] == 'apply_capability':
+            unresolved_gaps = last_discovery_event['remaining_gaps']
+            sufficiency = 'UNSATISFIED' if unresolved_gaps else 'COVERED'
+        elif successful_searches:
+            sufficiency = 'UNSATISFIED'
+            unresolved_gaps = [successful_searches[-1]['arguments']['need']]
+        else:
+            sufficiency = 'COVERED'
+            unresolved_gaps = []
         self.turn_audit.update({
             'bundle_state_after': json.loads(
                 self.harness.render_bundle_context())['maintained_bundles'],
@@ -258,6 +313,24 @@ class ExperimentalSkillAgent:
                            for event in row['tool_executions']],
             'retrieval_call_count_after': self.harness.retrieval_call_count,
             'body_load_count_after': self.harness.body_load_count,
+            'search_count': self.harness.turn_search_count,
+            'search_attempt_count': self.harness.turn_search_attempt_count,
+            'repeated_search_count': self.harness.turn_repeated_search_count,
+            'no_progress_search_count': self.harness.turn_no_progress_count,
+            'search_budget_hits': self.harness.turn_search_budget_hits,
+            'search_needs': list(self.harness.turn_search_needs),
+            'apply_count': len(applications),
+            'capability_sufficiency_outcome': sufficiency,
+            'sufficiency_transitions': [
+                ('SEARCH_MORE' if event['tool'] == 'load_capability'
+                 else ('UNSATISFIED' if event['remaining_gaps'] else 'COVERED'))
+                for row in self.trace
+                for event in row['tool_executions']
+                if ((event['tool'] == 'load_capability'
+                     and 'model_visible_payload' in event)
+                    or (event['tool'] == 'apply_capability'
+                        and 'remaining_gaps' in event))],
+            'unresolved_gaps': list(unresolved_gaps),
             'load_capability_called': load_capability_called,
             'load_skill_body_called': load_skill_body_called,
             'bundle_reuse_outcome': outcome,
@@ -288,6 +361,8 @@ class ExperimentalSkillAgent:
             result = self.harness.apply_capability(json.dumps(arguments))
             row['selected_skill_ids'].extend(result['selected_skill_ids'])
             row['action'] = result['action']
+            event['coverage'] = deepcopy(result['coverage'])
+            event['remaining_gaps'] = list(result['remaining_gaps'])
             result['skill_bodies'] = [body for body in result['skill_bodies']
                                     if body['skill_id'] not in self._history_skill_ids]
             result['state'] = self._state_snapshot()
@@ -306,7 +381,7 @@ class ExperimentalSkillAgent:
         if not task.strip():
             raise ValueError('task must not be empty')
         self.trace = []
-        self.harness.pending_candidates = None
+        self.harness.begin_turn()
         self.turn_audit = {
             'bundle_state_before': json.loads(
                 self.harness.render_bundle_context())['maintained_bundles'],
@@ -370,7 +445,8 @@ class ExperimentalSkillAgent:
                         # boundary but fail the Harness's stricter capability checks.
                         # Return that result to this same model/history so it can
                         # correct the call; never commit a failed application.
-                        self._tool_result(call['id'], {'error': {'type': type(exc).__name__}})
+                        self._tool_result(call['id'], {'error': {
+                            'type': type(exc).__name__, 'message': str(exc)}})
                         for remaining in calls[index + 1:]:
                             self._tool_result(remaining['id'], {'error': {'type': 'NotExecuted'}})
                         row['tool_error'] = {'type': type(exc).__name__}

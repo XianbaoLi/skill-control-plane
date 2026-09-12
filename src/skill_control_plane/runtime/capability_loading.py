@@ -42,6 +42,14 @@ class CapabilityDecision:
     reason: str
     target_bundle_id: str | None = None
     purpose: str | None = None
+    coverage: tuple['CoverageClaim', ...] = ()
+    remaining_gaps: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CoverageClaim:
+    need: str
+    covered_by: str
 
 
 @dataclass(frozen=True)
@@ -92,7 +100,8 @@ def _strict_object(pairs):
 
 
 def validate_decision(raw: str, skills: SkillDiscoveryResult,
-                      runtime_state: RuntimeCapabilityState) -> CapabilityDecision:
+                      runtime_state: RuntimeCapabilityState, *,
+                      require_coverage: bool = False) -> CapabilityDecision:
     data = json.loads(raw, object_pairs_hook=_strict_object)
     if not isinstance(data, dict) or not isinstance(data.get('action'), str):
         raise ValueError('decision must be an object with action')
@@ -100,7 +109,10 @@ def validate_decision(raw: str, skills: SkillDiscoveryResult,
     fields = {'DIRECT': {'action', 'skill_ids', 'reason'},
               'EXTEND': {'action', 'skill_ids', 'reason', 'target_bundle_id'},
               'CREATE': {'action', 'skill_ids', 'reason', 'purpose'}}
-    if action not in fields or set(data) != fields[action]:
+    coverage_fields = {'coverage', 'remaining_gaps'}
+    extended = require_coverage or bool(set(data) & coverage_fields)
+    expected = fields.get(action, set()) | (coverage_fields if extended else set())
+    if action not in fields or set(data) != expected:
         raise ValueError('invalid action or action-specific fields')
     ids = data['skill_ids']
     if not isinstance(ids, list) or not ids or any(not isinstance(s, str) or not s.strip() for s in ids):
@@ -120,8 +132,46 @@ def validate_decision(raw: str, skills: SkillDiscoveryResult,
             raise ValueError('EXTEND requires at least one new skill')
     if action == 'CREATE' and (not isinstance(purpose, str) or not purpose.strip()):
         raise ValueError('CREATE requires non-empty purpose')
+    coverage: list[CoverageClaim] = []
+    remaining_gaps: tuple[str, ...] = ()
+    if extended:
+        raw_coverage = data['coverage']
+        if not isinstance(raw_coverage, list):
+            raise ValueError('coverage must be an array')
+        bundle_ids = {bundle.bundle_id for bundle in runtime_state.active_bundles}
+        candidate_ids = {candidate.skill_id for candidate in skills.candidates}
+        selected_ids = set(ids)
+        covered_selected_ids: set[str] = set()
+        for claim in raw_coverage:
+            if not isinstance(claim, dict) or set(claim) != {'need', 'covered_by'}:
+                raise ValueError('coverage items require only need and covered_by')
+            need, covered_by = claim['need'], claim['covered_by']
+            if (not isinstance(need, str) or not need.strip()
+                    or not isinstance(covered_by, str) or not covered_by.strip()):
+                raise ValueError('coverage need and covered_by must be non-empty text')
+            if covered_by.startswith('bundle:'):
+                if covered_by.removeprefix('bundle:') not in bundle_ids:
+                    raise ValueError('coverage references a non-current Bundle')
+            elif covered_by.startswith('skill:'):
+                covered_skill = covered_by.removeprefix('skill:')
+                if covered_skill not in candidate_ids:
+                    raise ValueError('coverage references a Skill outside pending candidates')
+                if covered_skill not in selected_ids:
+                    raise ValueError('coverage Skill must be selected for commitment')
+                covered_selected_ids.add(covered_skill)
+            else:
+                raise ValueError('covered_by must use bundle: or skill:')
+            coverage.append(CoverageClaim(need.strip(), covered_by))
+        if selected_ids - covered_selected_ids:
+            raise ValueError('every selected Skill requires a coverage claim')
+        raw_gaps = data['remaining_gaps']
+        if (not isinstance(raw_gaps, list)
+                or any(not isinstance(gap, str) or not gap.strip() for gap in raw_gaps)):
+            raise ValueError('remaining_gaps must be an array of non-empty strings')
+        remaining_gaps = tuple(dict.fromkeys(gap.strip() for gap in raw_gaps))
     return CapabilityDecision(action, tuple(dict.fromkeys(ids)), data['reason'].strip(),
-                              target, purpose.strip() if purpose is not None else None)
+                              target, purpose.strip() if purpose is not None else None,
+                              tuple(coverage), remaining_gaps)
 
 
 def build_resolver_prompt(need: str, skills: SkillDiscoveryResult,
@@ -192,6 +242,9 @@ class CapabilityLoadResult:
 
 def _decision_json(decision: CapabilityDecision) -> str:
     data = asdict(decision)
+    if not decision.coverage and not decision.remaining_gaps:
+        for field_name in ('coverage', 'remaining_gaps'):
+            data.pop(field_name)
     return json.dumps({k: v for k, v in data.items() if v is not None})
 
 

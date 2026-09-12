@@ -70,7 +70,8 @@ def test_retrieval_pool_merges_two_searches_then_selects_both():
     assert set(search) == {"need", "model_visible_payload",
                            "internal_retrieval_record", "pool_after"}
     assert search["internal_retrieval_record"]["representations"]
-    assert set(search["model_visible_payload"]) == {"query", "candidates"}
+    assert set(search["model_visible_payload"]) == {
+        "query", "candidates", "search_control"}
 
 
 def test_retrieval_failure_categories_distinguish_pool_from_selection():

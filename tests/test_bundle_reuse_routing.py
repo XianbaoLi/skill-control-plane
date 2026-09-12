@@ -59,20 +59,71 @@ def native(name, arguments):
     }]}
 
 
-def test_bundle_capabilities_are_structured_deduplicated_and_bounded():
+def test_compact_bundle_capabilities_are_structured_deduplicated_and_bounded():
     runtime = harness()
     surface = runtime.render_bundle_context()
     bundle = json.loads(surface)['maintained_bundles'][0]
-    assert len(bundle['capabilities']) == 8
+    assert len(bundle['capabilities']) == 5
     assert bundle['capabilities'][:3] == [
         'create presentation slides',
         'edit existing presentations',
-        'x' * 119 + '…',
+        'x' * 95 + '…',
     ]
-    assert all(len(phrase) <= 120 for phrase in bundle['capabilities'])
+    assert all(len(phrase) <= 96 for phrase in bundle['capabilities'])
+    assert set(bundle['members'][0]) == {'skill_id', 'name', 'body_state'}
+    assert 'presentation metadata' not in surface
     assert 'PRIVATE_POWERPOINT_BODY' not in surface
     assert 'cue' not in surface
     assert len(surface) < len(runtime.discovery.records['powerpoint'].body)
+
+
+def test_old_bundle_surface_is_available_only_for_controlled_ab():
+    runtime = harness()
+    old = json.loads(runtime.render_bundle_context(compact=False))[
+        'maintained_bundles'][0]
+    assert len(old['capabilities']) == 8
+    assert set(old['members'][0]) == {
+        'skill_id', 'name', 'short_description', 'body_state'}
+    assert old['members'][0]['short_description'] == 'presentation metadata'
+
+
+def test_compact_capabilities_round_robin_members_and_remove_containment():
+    records = [
+        SkillRecord('a', 'A', 'fallback a', '', '/a/SKILL.md'),
+        SkillRecord('b', 'B', 'fallback b', '', '/b/SKILL.md'),
+    ]
+    cards = {
+        'a': card('a', ('Create slides', 'slides', 'Render slides')),
+        'b': card('b', ('Export PDF', 'CREATE SLIDES', 'Validate PDF')),
+    }
+    runtime = RuntimeCapabilityHarness(
+        discovery=SkillDiscovery(SkillRegistry(records, retrieval_cards=cards)),
+        state=RuntimeCapabilityState([
+            ActiveBundle('documents', 'Document work', ('b', 'a'))],
+            skill_body_states={'a': 'resident', 'b': 'evicted'}),
+    )
+    bundle = json.loads(runtime.render_bundle_context())['maintained_bundles'][0]
+    assert bundle['capabilities'] == [
+        'Create slides', 'Export PDF', 'Render slides', 'Validate PDF']
+    assert [member['skill_id'] for member in bundle['members']] == ['a', 'b']
+
+
+def test_compact_capabilities_use_one_prioritized_fallback_representation():
+    records = [
+        SkillRecord('use', 'Use', 'description should not appear', '', ''),
+        SkillRecord('description', 'Description', '  fallback\n description  ', '', ''),
+    ]
+    cards = {'use': card('use', (), ('use-when fallback',))}
+    runtime = RuntimeCapabilityHarness(
+        discovery=SkillDiscovery(SkillRegistry(records, retrieval_cards=cards)),
+        state=RuntimeCapabilityState([
+            ActiveBundle('fallbacks', 'Fallbacks', ('use', 'description'))],
+            skill_body_states={'use': 'resident', 'description': 'resident'}),
+    )
+    capabilities = json.loads(runtime.render_bundle_context())[
+        'maintained_bundles'][0]['capabilities']
+    assert capabilities == ['fallback description', 'use-when fallback']
+    assert 'description should not appear' not in capabilities
 
 
 def test_registry_from_tree_retains_structured_card_accessor(tmp_path):
@@ -88,14 +139,20 @@ def test_registry_from_tree_retains_structured_card_accessor(tmp_path):
     registry = SkillRegistry.from_tree(tmp_path, cards=cards)
     assert registry.capability_phrases('powerpoint') == (
         'edit existing presentations', 'when revising slides')
+    assert registry.bundle_capability_phrases('powerpoint') == (
+        'edit existing presentations',)
     assert registry.load_skill_body('powerpoint') == 'BODY'
 
 
-def test_bundle_first_policy_is_explicit_without_new_decision_protocol():
+def test_bundle_first_policy_includes_trigger_and_sufficiency_protocol():
     assert 'Before calling load_capability' in AGENT_INSTRUCTIONS
     assert "Bundle's purpose" in AGENT_INSTRUCTIONS
     assert 'capabilities' in AGENT_INSTRUCTIONS
-    assert 'residual capability gap' in AGENT_INSTRUCTIONS
+    assert 'explicit capability gap' in AGENT_INSTRUCTIONS
+    assert 'COVERED' in AGENT_INSTRUCTIONS
+    assert 'SEARCH_MORE' in AGENT_INSTRUCTIONS
+    assert 'UNSATISFIED' in AGENT_INSTRUCTIONS
+    assert 'Precision of commitment' in AGENT_INSTRUCTIONS
     assert 'New user wording does not imply' in AGENT_INSTRUCTIONS
     assert 'ONLY the uncovered capability gap' in AGENT_INSTRUCTIONS
     assert 'Return JSON' not in AGENT_INSTRUCTIONS

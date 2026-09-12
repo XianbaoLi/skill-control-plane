@@ -86,16 +86,14 @@ def audit_context_flow(calls, records):
         assert set(surface) == {'maintained_bundles'}
         for bundle in surface['maintained_bundles']:
             assert set(bundle) == {'bundle_id', 'purpose', 'capabilities', 'members'}
-            assert len(bundle['capabilities']) <= 8
-            assert all(isinstance(phrase, str) and len(phrase) <= 120
+            assert len(bundle['capabilities']) <= 5
+            assert all(isinstance(phrase, str) and len(phrase) <= 96
                        for phrase in bundle['capabilities'])
             for member in bundle['members']:
-                assert set(member) == {'skill_id', 'name', 'short_description',
-                                       'body_state'}
+                assert set(member) == {'skill_id', 'name', 'body_state'}
                 assert member['body_state'] in {'resident', 'evicted'}
                 record = records[member['skill_id']]
                 assert member['name'] == record.name
-                assert member['short_description'] == ' '.join(record.description.split())[:240]
         for record in records.values():
             if record.body:
                 assert record.body not in system

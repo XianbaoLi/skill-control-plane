@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, replace
 
 from skill_control_plane.retrieval.discovery import SkillDiscovery, SkillDiscoveryResult
@@ -20,7 +21,8 @@ class RuntimeCapabilityHarness:
 
     def __init__(self, loader: RuntimeCapabilityLoader | None = None,
                  state: RuntimeCapabilityState | None = None, *,
-                 discovery: SkillDiscovery | None = None):
+                 discovery: SkillDiscovery | None = None,
+                 max_searches_per_turn: int = 3):
         if (loader is None) == (discovery is None):
             raise ValueError('provide exactly one loader or discovery')
         self.loader = loader
@@ -29,6 +31,16 @@ class RuntimeCapabilityHarness:
         self.pending_candidates: SkillDiscoveryResult | None = None
         self.retrieval_call_count = 0
         self.body_load_count = 0
+        if max_searches_per_turn < 1:
+            raise ValueError('max_searches_per_turn must be positive')
+        self.max_searches_per_turn = max_searches_per_turn
+        self.turn_search_count = 0
+        self.turn_search_attempt_count = 0
+        self.turn_repeated_search_count = 0
+        self.turn_no_progress_count = 0
+        self.turn_search_budget_hits = 0
+        self.turn_search_needs: list[str] = []
+        self.last_search_control: dict = {}
         validate_state(self.state, self.discovery)
 
     @property
@@ -36,10 +48,32 @@ class RuntimeCapabilityHarness:
         return tuple(sorted(self.state.direct_skills.union(
             *(set(b.skill_ids) for b in self.state.active_bundles))))
 
-    def _bundle_capabilities(self, skill_ids: tuple[str, ...], *,
-                             max_items: int = 8,
-                             max_chars: int = 120) -> list[str]:
-        """Bounded, deterministic coverage phrases from offline card fields."""
+    @staticmethod
+    def _clean_bundle_phrase(raw: str, *, max_chars: int) -> str:
+        phrase = ' '.join(raw.split()).strip()
+        if len(phrase) > max_chars:
+            phrase = phrase[:max_chars - 1].rstrip() + '…'
+        return phrase
+
+    @staticmethod
+    def _bundle_phrase_key(phrase: str) -> str:
+        return ' '.join(re.sub(r'[^\w]+', ' ', phrase.casefold()).split())
+
+    @classmethod
+    def _is_redundant_bundle_phrase(cls, phrase: str,
+                                    selected: list[str]) -> bool:
+        key = cls._bundle_phrase_key(phrase)
+        for existing in selected:
+            other = cls._bundle_phrase_key(existing)
+            if key == other or f' {key} ' in f' {other} ' \
+                    or f' {other} ' in f' {key} ':
+                return True
+        return False
+
+    def _old_bundle_capabilities(self, skill_ids: tuple[str, ...], *,
+                                 max_items: int = 8,
+                                 max_chars: int = 120) -> list[str]:
+        """Previous Bundle coverage surface retained only for controlled A/B."""
 
         phrases: list[str] = []
         seen: set[str] = set()
@@ -48,11 +82,9 @@ class RuntimeCapabilityHarness:
             if not structured:
                 structured = (self.discovery.records[skill_id].description,)
             for raw in structured:
-                phrase = ' '.join(raw.split()).strip()
+                phrase = self._clean_bundle_phrase(raw, max_chars=max_chars)
                 if not phrase:
                     continue
-                if len(phrase) > max_chars:
-                    phrase = phrase[:max_chars - 1].rstrip() + '…'
                 key = phrase.casefold()
                 if key in seen:
                     continue
@@ -62,16 +94,47 @@ class RuntimeCapabilityHarness:
                     return phrases
         return phrases
 
-    def render_bundle_context(self) -> str:
-        """Compact maintained capabilities; no direct surface, bodies or cards."""
+    def _bundle_capabilities(self, skill_ids: tuple[str, ...], *,
+                             max_items: int = 5,
+                             max_chars: int = 96) -> list[str]:
+        """Compact deterministic coverage, balanced across Bundle members."""
+
+        member_phrases = [
+            [self._clean_bundle_phrase(raw, max_chars=max_chars)
+             for raw in self.discovery.bundle_capability_phrases(skill_id)]
+            for skill_id in sorted(skill_ids)
+        ]
+        selected: list[str] = []
+        offset = 0
+        while len(selected) < max_items:
+            consumed = False
+            for phrases in member_phrases:
+                if offset >= len(phrases):
+                    continue
+                consumed = True
+                phrase = phrases[offset]
+                if phrase and not self._is_redundant_bundle_phrase(phrase, selected):
+                    selected.append(phrase)
+                    if len(selected) == max_items:
+                        return selected
+            if not consumed:
+                break
+            offset += 1
+        return selected
+
+    def render_bundle_context(self, *, compact: bool = True) -> str:
+        """Maintained coverage only; never bodies or full Retrieval Cards."""
+
+        capabilities = (self._bundle_capabilities if compact
+                        else self._old_bundle_capabilities)
         return json.dumps({'maintained_bundles': [
             {'bundle_id': bundle.bundle_id, 'purpose': bundle.purpose,
-             'capabilities': self._bundle_capabilities(bundle.skill_ids),
+             'capabilities': capabilities(bundle.skill_ids),
              'members': [
                  {'skill_id': skill_id,
                   'name': self.discovery.records[skill_id].name,
-                  'short_description': ' '.join(
-                      self.discovery.records[skill_id].description.split())[:240],
+                  **({} if compact else {'short_description': ' '.join(
+                      self.discovery.records[skill_id].description.split())[:240]}),
                   'body_state': self.state.skill_body_states[skill_id]}
                  for skill_id in sorted(bundle.skill_ids)
              ]}
@@ -81,6 +144,19 @@ class RuntimeCapabilityHarness:
     def search_capability(self, need: str, *, k: int = 10) -> SkillDiscoveryResult:
         """Agent load_capability stage: search only, never call a resolver."""
         validate_state(self.state, self.discovery)
+        self.turn_search_attempt_count += 1
+        if self.turn_search_count >= self.max_searches_per_turn:
+            self.turn_search_budget_hits += 1
+            raise ValueError(
+                'Per-turn load_capability budget exhausted. Do not search again; '
+                'use current candidates or leave remaining gaps unresolved.')
+        had_previous_search = self.turn_search_count > 0
+        previous_ids = ({candidate.skill_id for candidate in self.pending_candidates.candidates}
+                        if self.pending_candidates is not None else set())
+        previous_query = (self.pending_candidates.query.casefold().strip()
+                          if self.pending_candidates is not None else None)
+        self.turn_search_count += 1
+        self.turn_search_needs.append(need)
         self.retrieval_call_count += 1
         candidates = self.discovery.discover_skills(need, k=k)
         # Only publish a merged pool after successful retrieval. The returned
@@ -96,18 +172,53 @@ class RuntimeCapabilityHarness:
             self.pending_candidates = replace(
                 candidates, candidates=tuple(merged.values()),
                 representations=tuple(representations.items()))
+        current_ids = {candidate.skill_id for candidate in self.pending_candidates.candidates}
+        new_ids = sorted(current_ids - previous_ids)
+        no_progress = not new_ids
+        repeated_query = previous_query == need.casefold().strip()
+        if no_progress:
+            self.turn_no_progress_count += 1
+        if repeated_query or (had_previous_search and no_progress):
+            self.turn_repeated_search_count += 1
+        self.last_search_control = {
+            'search_count': self.turn_search_count,
+            'remaining_search_budget': self.max_searches_per_turn
+                - self.turn_search_count,
+            'new_candidate_skill_ids': new_ids,
+            'meaningful_expansion': not no_progress,
+            'repeated_query': repeated_query,
+            'message': (None if not no_progress else
+                        'No meaningful new candidates were discovered. Do not '
+                        'repeat the same search. Use current candidates or leave '
+                        'the gap unresolved.'),
+        }
         return candidates
+
+    def begin_turn(self) -> None:
+        """Reset search-local closure and hard-budget accounting."""
+
+        self.pending_candidates = None
+        self.turn_search_count = 0
+        self.turn_search_attempt_count = 0
+        self.turn_repeated_search_count = 0
+        self.turn_no_progress_count = 0
+        self.turn_search_budget_hits = 0
+        self.turn_search_needs = []
+        self.last_search_control = {}
 
     def model_visible_candidates(self, result: SkillDiscoveryResult) -> dict:
         """Return the compact load_capability result safe to append to model history."""
-        return self.discovery.model_visible_payload(result)
+        return {**self.discovery.model_visible_payload(result),
+                'search_control': dict(self.last_search_control)}
 
     def apply_capability(self, raw_decision: str) -> dict:
         """Apply against this turn's uncommitted search pool; consume on success."""
         if self.pending_candidates is None:
             raise ValueError('apply_capability requires a fresh load_capability result')
         validate_state(self.state, self.discovery)
-        decision = validate_decision(raw_decision, self.pending_candidates, self.state)
+        decision = validate_decision(
+            raw_decision, self.pending_candidates, self.state,
+            require_coverage=True)
         state, target = apply_decision(decision, self.pending_candidates, self.state)
         bundle_skill_ids = {
             skill_id for bundle in state.active_bundles for skill_id in bundle.skill_ids
@@ -118,6 +229,8 @@ class RuntimeCapabilityHarness:
         result = {
             'action': decision.action, 'affected_bundle_id': target,
             'selected_skill_ids': list(decision.skill_ids),
+            'coverage': [asdict(claim) for claim in decision.coverage],
+            'remaining_gaps': list(decision.remaining_gaps),
             'skill_bodies': [
                 {'skill_id': skill_id, 'body': self.discovery.records[skill_id].body}
                 for skill_id in decision.skill_ids
