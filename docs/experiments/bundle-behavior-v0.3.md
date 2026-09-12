@@ -1,5 +1,8 @@
 # Bundle behavior experiment v0.3
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 This experiment observes four consecutive tasks through one unchanged
 `ExperimentalSkillAgent`, one recording client backed by one conversation client,
 and one growing history. It preserves RuntimeCapabilityState across turns and

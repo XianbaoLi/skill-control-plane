@@ -1,5 +1,8 @@
 # Capability-need representation vs raw evidence — Exact Hermes 87 Skills
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 ## Finding
 
 The joint hypothesis is **not satisfied** in this run. Capability-need extraction

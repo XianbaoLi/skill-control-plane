@@ -1,5 +1,8 @@
 # current87: 13 targets × 5 frozen queries
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 Completed retrieval-only robustness evaluation over all six current field-ablation
 representations. No runtime rerouting, activation, Gold edits, representation edits,
 or tuning. Each target contributes V0 verbatim and four wording variants, frozen

@@ -1,5 +1,8 @@
 # Historical Hermes 87-skill snapshot rebuild audit
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 Completed locally without modifying the live tree, Hermes Git history, or the official incomplete frozen directory. No representation was regenerated or relabelled.
 
 ## Root cause

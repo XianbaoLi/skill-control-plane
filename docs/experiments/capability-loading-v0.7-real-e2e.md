@@ -1,5 +1,8 @@
 # V0.7 真实 Hermes 87-skill E2E 验收
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 结论：检索 → Resolver 数据链路可运行，但四项真实语义验收仅 CREATE 符合预期。当前不建议作为“Capability Loading E2E 已验收”提交。未修改 V0.7 产品实现，未 commit/push。
 
 ## 语料与执行边界

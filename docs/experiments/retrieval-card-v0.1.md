@@ -1,5 +1,8 @@
 # RetrievalCard v0.1 — frozen-query retrieval ablation
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 ## Goal
 
 Improve Skill candidate recall without changing the runtime query generator.

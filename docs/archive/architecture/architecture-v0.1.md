@@ -1,5 +1,8 @@
 # Architecture V0.1
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 ## Problem
 
 A growing Skill library creates two control problems:

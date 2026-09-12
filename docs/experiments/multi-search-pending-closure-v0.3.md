@@ -1,5 +1,8 @@
 # Native schema / multi-search pending closure v0.3
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 分支：`feature/bundle-behavior-experiment-v0.3`。未 commit / push。
 
 ## 实现边界

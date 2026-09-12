@@ -1,5 +1,8 @@
 # Experiment — Public-81 Stage Bundle Baseline
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 Date: 2026-09-08
 
 ## Purpose

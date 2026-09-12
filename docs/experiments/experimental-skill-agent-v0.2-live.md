@@ -1,5 +1,8 @@
 # Experimental Skill Agent v0.2 live acceptance
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 Run: 2026-09-11 00:10 Asia/Shanghai (trace start: 2026-09-10T16:10:51 UTC).
 Result: **success**, using `GLM-5.3-flash` and real `GLM-Embedding-3` Dense + BM25/RRF
 against current87. No lexical-only fallback, candidate fixtures or scripted model

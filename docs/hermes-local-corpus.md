@@ -1,5 +1,8 @@
 # Hermes Local Corpus Snapshot
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 The first real V0.1 corpus comes from the local Hermes Skill library.
 
 Current reference environment:

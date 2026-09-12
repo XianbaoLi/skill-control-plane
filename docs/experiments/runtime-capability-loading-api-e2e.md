@@ -1,5 +1,8 @@
 # Runtime capability loading — live API acceptance
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 ## Outcome
 
 The implementation and offline transitions are testable, but live resolver acceptance is blocked by provider HTTP 429. No mock/replay decision was substituted. All three initial runtime states remained unchanged.

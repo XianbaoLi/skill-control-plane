@@ -1,5 +1,8 @@
 # Experimental Skill Agent v0.1 live acceptance
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 A live run on 2026-09-10 completed the single-model dynamic loading cycle with
 `GLM-5.3-flash`, real `GLM-Embedding-3` Dense retrieval and BM25/RRF over current87.
 The task asked for a concrete installed-tool workflow to extract scanned PDF

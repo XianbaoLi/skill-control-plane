@@ -1,5 +1,8 @@
 # Finding
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 本轮固定预算下 **Hard → Soft 不值得替换基线；Soft → Soft+Repair 也未显示收益**：候选召回从 70.83% 降至 45.83%，repair 触发 75% 却未恢复任何 required Skill。
 
 实验日期：2026-09-09。分支 `feature/soft-bundle-retrieval-v0.3`，基线 checkpoint `d0ff3f1` 保持可回退；未 merge main。

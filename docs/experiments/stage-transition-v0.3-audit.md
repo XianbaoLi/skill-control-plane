@@ -1,5 +1,8 @@
 # Audited Stage-transition additions v0.3
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 ## Purpose
 
 This set adds **10 positive post-S1 `new_required` transitions** across **7 cases**.

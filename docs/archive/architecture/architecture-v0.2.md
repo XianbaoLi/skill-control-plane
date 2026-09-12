@@ -1,5 +1,8 @@
 # Architecture V0.2 — Stage Capability Bundles
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 ## Goal
 
 V0.2 changes runtime routing from fine-grained Skill switching into **stage-batched capability loading**.

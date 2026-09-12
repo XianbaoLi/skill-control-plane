@@ -1,5 +1,8 @@
 # Pi / OpenPI Bundle 动态更新：本地 runtime 验证
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 日期：2026-09-09。范围仅限 Bundle Update；不实现 Trigger、Reroute 或通用控制器。
 
 **结论：可以在同一 AgentSession 的轮次之间替换 Skill 集合，不需要修改 Pi core 或 OpenPI 源码。** 本次采用 SDK adapter 的 `skillsOverride` + `session.reload()`。这是同一会话的资源/扩展重载，不是所有扩展状态无损的热替换。

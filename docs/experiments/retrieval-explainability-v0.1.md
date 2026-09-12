@@ -1,5 +1,8 @@
 # Retrieval explainability v0.1 — field ablation + query robustness
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 ## Scope
 
 This experiment extends RetrievalCard v0.1 without changing the runtime query

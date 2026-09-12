@@ -1,5 +1,8 @@
 # Gold Annotation V0.1
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 ## Purpose
 
 The runtime retrieval Gold set evaluates whether the retrieval layer preserves the

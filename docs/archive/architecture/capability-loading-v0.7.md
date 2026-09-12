@@ -1,5 +1,8 @@
 # Capability Loading V0.7
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 LLM requests capability;
 Skill is the atomic capability unit;
 Bundle is a reusable capability composition;

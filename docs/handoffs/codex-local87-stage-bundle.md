@@ -1,5 +1,8 @@
 # Codex Handoff — Exact 87-Skill Stage Bundle Experiment
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 ## Objective
 
 Run the Stage Capability Bundle experiment against the user's exact local

@@ -1,57 +1,53 @@
 # Skill Control Plane
 
-An evaluation-first control layer for large Agent Skill libraries.
+Skill Control Plane is a small, inspectable control layer for discovering Agent
+Skills, closing capability gaps within a user turn, and retaining compact
+capability memory across turns. V1 keeps retrieval deterministic and keeps model
+protocol concerns outside Core.
 
-## V0.1 hypothesis
+## V1 architecture
 
-> Deterministic retrieval narrows a large Skill library into a high-recall candidate set with inspectable evidence; an LLM judge makes the semantic decision; runtime routing can re-run when the task state changes instead of locking the initial Skill set.
-
-V0.1 validates two loops. V0.2 keeps those baselines and adds a stage-batched runtime working set:
-
-1. **Runtime routing** — retrieve candidate Skills from the current task state and support re-routing on subgoal transitions, execution failures, and capability gaps.
-2. **Evolution preflight** — retrieve existing Skills before learning from a new experience, then decide whether the experience is already covered, refines/extends an existing Skill, or is novel.\n3. **Stage capability bundles (V0.2)** — one retrieval pass forms an Active Bundle plus a compact Capability Shelf; later evidence expands an existing bundle or creates a new one without automatically discarding prior capabilities.
-
-The first release is deliberately proposal-first. It does **not** automatically merge, archive, delete, supersede, or mutate a user's live Skill library.
-
-## V0.1 decision surface
-
-Evolution relations:
-
-- `COVERED` → `NOOP`
-- `REFINES` → `PATCH_PROPOSAL`
-- `EXTENDS` → `PATCH_PROPOSAL`
-- `NOVEL` → `CREATE_PROPOSAL`
-
-Runtime re-routing triggers:
-
-- subgoal transition
-- execution failure
-- explicit capability gap
-
-## Architecture
+The current runtime has five layers:
 
 ```text
-                   Skill Registry
-                         |
-                    Skill Index
-                         |
-                 Retrieval / Evidence
-                  /                \
-                 /                  \
-        Runtime Judge          Evolution Judge
-             |                      |
-       Active Skill Set      NOOP / PATCH / CREATE
-             |
-         Agent runtime
-             |
-     subgoal / failure / gap
-             |
-          re-route
+integrations
+    ↓
+runtime/discovery_session ──→ discovery ──→ registry
+runtime/capability_memory ─────────────────→ registry
 ```
 
-Runtime and evolution intentionally share the same registry and retrieval layer.
+- `registry`: the Skill Store; parses and retains Skill metadata, source path,
+  content hash and `SKILL.md` body, with exact `skill_id` lookup.
+- `discovery`: Retrieval Cards, BM25/Dense/RRF, one search, compact candidates
+  and retrieval trace.
+- `runtime/discovery_session`: per-turn Candidate Closure, search budget,
+  no-progress/repeated-query handling, sufficiency and candidate eligibility.
+- `runtime/capability_memory`: cross-turn Bundles, Bundle Cards and resident or
+  evicted Skill Body state.
+- `integrations`: native tool schemas and loop, Bundle/context injection, and
+  canonical-to-model-visible History Projection.
 
-## Development
+`evals` is a sidecar validation system and is not part of the production runtime
+chain. Historical V0.x implementations live under `skill_control_plane.evals.legacy`.
+
+## Core flow
+
+```text
+user turn
+  → Bundle-first check
+  → uncovered gap: load_capability
+  → one Discovery search; accumulate pending Candidates in Discovery Session
+  → COVERED, SEARCH_MORE, or UNSATISFIED
+  → apply_capability with DIRECT, CREATE, or EXTEND
+  → exact Skill Body delivery
+  → Bundle memory update for CREATE/EXTEND only
+  → History Projection hides evicted or superseded body text from the model
+```
+
+DIRECT is a temporary activation in the current context; it does not create or
+extend long-term Bundle memory.
+
+## Quick start
 
 Requires Python 3.11+.
 
@@ -60,46 +56,20 @@ python -m pip install -e ".[dev]"
 pytest -q
 ```
 
-See `docs/architecture-v0.1.md`, `docs/architecture-v0.2.md`, and `docs/eval-v0.2.md`.
+Minimal Core construction:
 
-## Non-goals for V0.1
+```python
+from skill_control_plane import (
+    CapabilityMemory, DiscoverySession, SkillDiscovery, SkillStore,
+)
 
-No automatic lifecycle manager, Skill graph, hierarchy builder, multi-Skill DAG composer, marketplace, learned retriever, or automatic destructive mutation.
-
-
-## Stage Bundle experiment (V0.2)
-
-After creating or restoring the exact Skill snapshot referenced by
-`evals/gold/stage-transition-v0.2.jsonl`, run:
-
-```bash
-export HF_HUB_OFFLINE=1
-
-skill-control-plane eval stage-bundle \
-  /mnt/d/Hermes/skills \
-  --gold evals/gold/stage-transition-v0.2.jsonl \
-  --manifest local_artifacts/corpora/hermes-local-v0.1/manifest.json \
-  --dense-model sentence-transformers/multi-qa-MiniLM-L6-cos-v1 \
-  --k 5 \
-  --max-bundles 4 \
-  --max-skills-per-bundle 4
+store = SkillStore.from_tree("/path/to/skills")
+discovery = SkillDiscovery(store)
+memory = CapabilityMemory(store)
+session = DiscoverySession(discovery, memory)
 ```
 
-The first experiment intentionally uses:
+Corpus and evaluation commands are available through `skill-control-plane --help`.
 
-- S1 query = `initial_task`;
-- S2+ query = current raw runtime evidence only;
-- BM25 Top-K union Dense Top-K as the candidate pool;
-- deterministic category/tag grouping as the Bundle baseline;
-- no SRC/extra LLM call yet.
-
-Primary metrics:
-
-- `initial_shelf_future_skill_recall`: whether the initial Shelf already contains future required Skills;
-- `initial_shelf_future_bundle_recall`: whether it at least predicts the future capability group;
-- `shelf_reuse_rate`: later transitions that can reuse a previously discovered Bundle;
-- `new_bundle_rate`: later transitions that require a newly discovered capability group;
-- Active-vs-Shelf required-Skill recall.
-
-This experiment tests the value of retaining a compact Capability Shelf before
-adding retrieval-sufficiency thresholds or SRC semantic expansion.
+The single authoritative architecture and terminology reference is
+[V1 Runtime Architecture](docs/architecture/v1-runtime-architecture.md).

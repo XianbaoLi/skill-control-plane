@@ -1,5 +1,8 @@
 # Exact Hermes 87-Skill Stage Bundle V0.2
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 ## Baseline and implementation gate (recorded before algorithm changes)
 
 Branch: `feature/stage-capability-bundles-v0.2`. Baseline tests: **39 passed**.

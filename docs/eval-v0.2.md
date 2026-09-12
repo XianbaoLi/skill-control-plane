@@ -1,5 +1,8 @@
 # Evaluation Plan V0.2 — Stage Reroute L1
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 V0.2 currently focuses on the first clean stage-transition experiment:
 
 ```text
@@ -252,7 +255,7 @@ The first implementation deliberately uses deterministic metadata grouping (cate
 
 The initial task remains available for final task/stage alignment, but it is no longer required inside every capability-discovery query. This directly tests the anchoring concern exposed by the current A/B/C diagnostics.
 
-See `docs/architecture-v0.2.md` for the runtime design.
+See `docs/archive/architecture/architecture-v0.2.md` for the historical runtime design.
 
 
 ## Selective SRC escalation metrics

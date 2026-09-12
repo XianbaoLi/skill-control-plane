@@ -1,5 +1,8 @@
 # Experimental Skill Agent — native tool calling
 
+> **Historical / eval-only.** This document preserves evidence or an earlier design; it is not authoritative for the V1 runtime.
+
+
 This bounded experiment tests dynamic Skill management using one conversation
 client and one growing history. It is not an execution agent or a general agent
 framework. No resolver model runs inside capability loading.
