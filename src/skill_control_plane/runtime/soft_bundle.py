@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, replace
 from itertools import zip_longest
 
-from skill_control_plane.retrieval import BM25Retriever, candidate_union
+from skill_control_plane.discovery import BM25Retriever, candidate_union
 from skill_control_plane.runtime.bundles import default_group_key
 from skill_control_plane.runtime.capability_need import extract_query
 

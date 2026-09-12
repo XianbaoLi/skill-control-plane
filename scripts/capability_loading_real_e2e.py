@@ -15,8 +15,8 @@ from robustness_current87 import CachedEmbeddings
 from skill_control_plane import Bundle, BundleRegistry, CapabilityLoader, SkillDiscovery
 from skill_control_plane.cli import _validate_root_snapshot
 from skill_control_plane.registry import SkillRegistry
-from skill_control_plane.retrieval.bigmodel import BigModelDenseRetriever
-from skill_control_plane.retrieval.cards import load_retrieval_cards
+from skill_control_plane.discovery.bigmodel import BigModelDenseRetriever
+from skill_control_plane.discovery.cards import load_retrieval_cards
 
 FIXTURE = Path('fixtures/capability_loading/hermes87-real-e2e.json')
 OUTPUT = Path('local_artifacts/v0.7/real-e2e')
@@ -61,7 +61,8 @@ def main():
     load_environment()
     fixture = json.loads(FIXTURE.read_text())
     _validate_root_snapshot(fixture['corpus'], fixture['manifest'])
-    skills = SkillRegistry.from_tree(fixture['corpus'], cards=load_retrieval_cards(fixture['cards']))
+    skills = SkillRegistry.from_tree(fixture['corpus'])
+    cards = load_retrieval_cards(fixture['cards'])
     assert len(skills) == 87
     bundles = BundleRegistry(skills, [Bundle(**{**b, 'skill_ids': tuple(b['skill_ids'])}) for b in fixture['bundles']])
     OUTPUT.mkdir(parents=True, exist_ok=True)
@@ -69,8 +70,10 @@ def main():
     if not cache_path.exists():
         cache_path.write_bytes(Path(fixture['embedding_cache']).read_bytes())
     embed = CachedEmbeddings(cache_path)
-    discovery = SkillDiscovery(skills, dense_factory=lambda records: BigModelDenseRetriever(
-        records, model_name='embedding-3', dimensions=2048, embed_batch=embed), source_k=10)
+    discovery = SkillDiscovery(
+        skills, dense_factory=lambda records: BigModelDenseRetriever(
+            records, model_name='embedding-3', dimensions=2048, embed_batch=embed),
+        source_k=10, retrieval_cards=cards)
     loader = CapabilityLoader(discovery, bundles)
     limitation = None
     try:
@@ -79,7 +82,8 @@ def main():
         # Preserve provider error type/status only, never response bodies or credentials.
         cause = exc.__cause__
         limitation = f"Live Dense unavailable: {type(cause).__name__}, status={getattr(cause, 'code', None)}"
-        loader = CapabilityLoader(SkillDiscovery(skills), bundles)
+        loader = CapabilityLoader(
+            SkillDiscovery(skills, retrieval_cards=cards), bundles)
         rows = [trace(loader, case, fixture['k']) for case in fixture['cases']]
     frozen = json.loads(Path('local_artifacts/v0.6/robustness-current87-13target-65query-queries.json').read_text())
     selected = {('ST-01', 'S3'), ('ST-01', 'S4'), ('AT-07', 'S2'), ('AT-02', 'S2')}

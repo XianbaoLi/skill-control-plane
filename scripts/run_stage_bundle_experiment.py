@@ -10,7 +10,7 @@ from skill_control_plane.evals import (
     load_stage_transition_gold,
 )
 from skill_control_plane.registry import load_skill_tree
-from skill_control_plane.retrieval import (
+from skill_control_plane.discovery import (
     BM25Retriever,
     DEFAULT_DENSE_MODEL,
     DenseRetriever,

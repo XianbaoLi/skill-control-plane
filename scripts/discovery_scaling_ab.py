@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import mkdtemp
@@ -22,9 +23,9 @@ from skill_control_plane.evals.discovery_scaling import (
     summarize, write_summary_csv,
 )
 from skill_control_plane.registry import SkillRegistry
-from skill_control_plane.retrieval.bigmodel import BigModelDenseRetriever, BigModelEmbeddingClient
-from skill_control_plane.retrieval.cards import load_retrieval_cards
-from skill_control_plane.retrieval.discovery import SkillDiscovery
+from skill_control_plane.discovery.bigmodel import BigModelDenseRetriever, BigModelEmbeddingClient
+from skill_control_plane.discovery.cards import load_retrieval_cards
+from skill_control_plane.discovery.discovery import SkillDiscovery
 
 ROOT = Path("local_artifacts/v0.5/hermes-current87")
 MANIFEST = Path("local_artifacts/v0.5/hermes-current87-manifest.json")
@@ -389,7 +390,12 @@ def main():
         return
     load_environment()
     _validate_root_snapshot(str(ROOT), str(MANIFEST))
-    registry = SkillRegistry.from_tree(ROOT, cards=load_retrieval_cards(CARDS))
+    registry = SkillRegistry.from_tree(ROOT)
+    cards = load_retrieval_cards(CARDS)
+    discovery = SkillDiscovery(registry, retrieval_cards=cards)
+    for skill_id, text in discovery.texts.items():
+        registry._skills[skill_id] = replace(
+            registry.get(skill_id), retrieval_representation=text)
     real = {record.skill_id: record for record in registry}
     cases = load_cases(STAGE_GOLD, FROZEN, MULTI_GOLD)
     if args.freeze_distractors:

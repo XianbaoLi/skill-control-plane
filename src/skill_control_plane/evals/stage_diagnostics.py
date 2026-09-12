@@ -6,7 +6,7 @@ from skill_control_plane.evals.control_plane import (
     StageTransitionGoldCase,
     stage_retrieval_query,
 )
-from skill_control_plane.retrieval import candidate_union
+from skill_control_plane.discovery import candidate_union
 
 
 def _raw_evidence_query(case: StageTransitionGoldCase, stage_index: int) -> str:

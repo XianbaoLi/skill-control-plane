@@ -11,8 +11,8 @@ import pytest
 from skill_control_plane import Bundle, BundleRegistry, CapabilityLoader, SkillDiscovery
 from skill_control_plane.cli import _validate_root_snapshot
 from skill_control_plane.registry import SkillRegistry
-from skill_control_plane.retrieval.bigmodel import BigModelDenseRetriever
-from skill_control_plane.retrieval.cards import load_retrieval_cards
+from skill_control_plane.discovery.bigmodel import BigModelDenseRetriever
+from skill_control_plane.discovery.cards import load_retrieval_cards
 
 FIXTURE = Path(__file__).parents[1] / 'fixtures/capability_loading/hermes87-real-e2e.json'
 
@@ -24,30 +24,33 @@ def real_inputs():
         pytest.skip('Frozen Hermes experiment assets are local and not distributed')
     _validate_root_snapshot(data['corpus'], data['manifest'])
     assert json.loads(Path(data['manifest']).read_text())['snapshot_id'] == 'f670e9d5ecdbb299a5c5ac4fcc48ece35e0adadcfb7e24b96850a4ec5379e509'
-    skills = SkillRegistry.from_tree(data['corpus'], cards=load_retrieval_cards(data['cards']))
+    skills = SkillRegistry.from_tree(data['corpus'])
+    cards = load_retrieval_cards(data['cards'])
     assert len(skills) == 87
     bundles = BundleRegistry(skills, [Bundle(**{**b, 'skill_ids': tuple(b['skill_ids'])}) for b in data['bundles']])
-    return data, skills, bundles
+    return data, skills, cards, bundles
 
 
 @pytest.mark.parametrize('index,top', [(0, 'arxiv'), (1, 'github-code-review'),
                                        (2, 'systematic-debugging'), (3, 'ocr-and-documents')])
 def test_real_discovery_reaches_resolver_without_candidate_injection(real_inputs, index, top):
-    data, skills, bundles = real_inputs
-    loader = CapabilityLoader(SkillDiscovery(skills), bundles)
+    data, skills, cards, bundles = real_inputs
+    loader = CapabilityLoader(
+        SkillDiscovery(skills, retrieval_cards=cards), bundles)
     before = bundles.values()
     result = loader.load_capability(data['cases'][index]['need'])
     assert result.discovery.candidates[0].skill_id == top
     assert result.decision == 'CREATE'  # Observed limitation, NOT the desired semantics.
     assert len(result.discovery.candidates) == 5
     assert set(result.resolution.skill_ids) == {c.skill_id for c in result.discovery.candidates}
-    assert all(skills.get(c.skill_id).retrieval_representation for c in result.discovery.candidates)
+    assert all(loader.discovery.texts[c.skill_id] for c in result.discovery.candidates)
     assert bundles.values() == before
 
 
 def test_real_top1_direct_does_not_establish_sufficiency(real_inputs):
-    data, skills, bundles = real_inputs
-    loader = CapabilityLoader(SkillDiscovery(skills), bundles)
+    data, skills, cards, bundles = real_inputs
+    loader = CapabilityLoader(
+        SkillDiscovery(skills, retrieval_cards=cards), bundles)
     # A multi-capability request also becomes DIRECT solely by setting k=1.
     need = data['cases'][3]['need']
     top1 = loader.load_capability(need, k=1)
@@ -58,7 +61,7 @@ def test_real_top1_direct_does_not_establish_sufficiency(real_inputs):
 
 
 def test_real_cached_dense_rrf_preserves_historical_target_ranks(real_inputs):
-    data, skills, bundles = real_inputs
+    data, skills, cards, bundles = real_inputs
     report_path = Path('local_artifacts/v0.6/robustness-current87-13target-65query-full.json')
     if not report_path.exists():
         pytest.skip('Historical ranking report unavailable')
@@ -69,8 +72,10 @@ def test_real_cached_dense_rrf_preserves_historical_target_ranks(real_inputs):
         # Exact text lookup fails on a missing input; never returns synthetic vectors.
         return [cache['vectors'][text] for text in texts]
 
-    discovery = SkillDiscovery(skills, dense_factory=lambda records: BigModelDenseRetriever(
-        records, embed_batch=recorded_vectors), source_k=10)
+    discovery = SkillDiscovery(
+        skills, dense_factory=lambda records: BigModelDenseRetriever(
+            records, embed_batch=recorded_vectors), source_k=10,
+        retrieval_cards=cards)
     loader = CapabilityLoader(discovery, bundles)
     selected = {('ST-01', 'S3'), ('ST-01', 'S4'), ('AT-07', 'S2'), ('AT-02', 'S2')}
     checked = 0

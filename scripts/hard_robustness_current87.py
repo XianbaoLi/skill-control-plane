@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict, replace
 from pathlib import Path
 import robustness_current87 as prior
-from skill_control_plane.retrieval import candidate_union, reciprocal_rank_fusion
+from skill_control_plane.discovery import candidate_union, reciprocal_rank_fusion
 
 BASE = prior.BASE
 PREFIX = 'hard-robustness-current87-13target-39query'

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from skill_control_plane.retrieval import candidate_union
+from skill_control_plane.discovery import candidate_union
 
 
 @dataclass(frozen=True, slots=True)

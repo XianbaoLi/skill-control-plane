@@ -10,12 +10,12 @@ from tempfile import mkdtemp
 from skill_control_plane.cli import _validate_root_snapshot
 from skill_control_plane.corpus.bigmodel_chat import BigModelChatClient
 from skill_control_plane.registry import SkillRegistry
-from skill_control_plane.retrieval.bigmodel import (
+from skill_control_plane.discovery.bigmodel import (
     BigModelDenseRetriever,
     BigModelEmbeddingClient,
 )
-from skill_control_plane.retrieval.cards import load_retrieval_cards
-from skill_control_plane.retrieval.discovery import SkillDiscovery
+from skill_control_plane.discovery.cards import load_retrieval_cards
+from skill_control_plane.discovery.discovery import SkillDiscovery
 from skill_control_plane.runtime.capability_loading import (
     ActiveBundle, LLMCapabilityResolver, ResolverError, RuntimeCapabilityLoader,
     RuntimeCapabilityState,
@@ -46,7 +46,8 @@ def write(path, report):
 
 def main():
     _validate_root_snapshot(str(ROOT), str(MANIFEST))
-    skills = SkillRegistry.from_tree(ROOT, cards=load_retrieval_cards(CARDS))
+    skills = SkillRegistry.from_tree(ROOT)
+    cards = load_retrieval_cards(CARDS)
     assert len(skills) == 87
     base = Path('local_artifacts/runtime-capability-loading')
     base.mkdir(parents=True, exist_ok=True)
@@ -65,6 +66,7 @@ def main():
             dimensions=embedding_client.dimensions,
             embed_batch=embedding_client,
         ),
+        retrieval_cards=cards,
     )
     # Preflight all query vectors; provider failure aborts instead of falling back.
     for _, need in CASES:

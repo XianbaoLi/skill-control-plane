@@ -10,9 +10,9 @@ from skill_control_plane.cli import _validate_root_snapshot
 from skill_control_plane.corpus.bigmodel_chat import BigModelChatClient
 from skill_control_plane.evals.bundle_behavior import run_experiment
 from skill_control_plane.registry import SkillRegistry
-from skill_control_plane.retrieval.bigmodel import BigModelDenseRetriever, BigModelEmbeddingClient
-from skill_control_plane.retrieval.cards import load_retrieval_cards
-from skill_control_plane.retrieval.discovery import SkillDiscovery
+from skill_control_plane.discovery.bigmodel import BigModelDenseRetriever, BigModelEmbeddingClient
+from skill_control_plane.discovery.cards import load_retrieval_cards
+from skill_control_plane.discovery.discovery import SkillDiscovery
 
 
 def main():
@@ -40,7 +40,8 @@ def main():
 
     try:
         _validate_root_snapshot(str(ROOT), str(MANIFEST))
-        registry = SkillRegistry.from_tree(ROOT, cards=load_retrieval_cards(CARDS))
+        cards = load_retrieval_cards(CARDS)
+        registry = SkillRegistry.from_tree(ROOT)
         chat = BigModelChatClient(timeout=60, max_tokens=8192)
         embedding = BigModelEmbeddingClient(timeout=45)
         metadata.update(model=chat.model, dense_model=embedding.model,
@@ -48,8 +49,10 @@ def main():
                         snapshot_id=json.loads(MANIFEST.read_text())['snapshot_id'])
         save(report)
         print('Building real Dense index...', flush=True)
-        discovery = SkillDiscovery(registry, dense_factory=lambda records: BigModelDenseRetriever(
-            records, model_name=embedding.model, dimensions=embedding.dimensions, embed_batch=embedding))
+        discovery = SkillDiscovery(
+            registry, dense_factory=lambda records: BigModelDenseRetriever(
+                records, model_name=embedding.model, dimensions=embedding.dimensions,
+                embed_batch=embedding), retrieval_cards=cards)
         report = run_experiment(discovery, chat, max_steps=args.max_steps, checkpoint=save)
         report['context_audit'] = audit_context_flow(report['model_calls'], discovery.records)
         report['context_audit_status'] = 'passed'

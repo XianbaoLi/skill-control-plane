@@ -2,7 +2,7 @@
 
 from .capability_loading import CapabilityLoader, CapabilityResult, Decision, load_capability, resolve_bundle
 from .registry.bundles import Bundle, BundleRegistry
-from .retrieval.discovery import SkillDiscovery, SkillDiscoveryResult, discover_skills
+from .discovery.discovery import SkillDiscovery, SkillDiscoveryResult, discover_skills
 
 from .models import (
     EvolutionAction,

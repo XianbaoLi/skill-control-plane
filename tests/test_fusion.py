@@ -1,5 +1,5 @@
 from skill_control_plane.models import RetrievalCandidate
-from skill_control_plane.retrieval import candidate_union, reciprocal_rank_fusion
+from skill_control_plane.discovery import candidate_union, reciprocal_rank_fusion
 
 
 def c(skill_id: str, score: float, rank: int) -> RetrievalCandidate:

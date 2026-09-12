@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from skill_control_plane.models import SkillRecord
-from skill_control_plane.retrieval import DenseRetriever, metadata_text
+from skill_control_plane.discovery import DenseRetriever, metadata_text
 
 
 class FakeEmbeddingModel:

@@ -8,7 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from skill_control_plane.models import RetrievalCandidate, SkillRecord
-from skill_control_plane.retrieval.dense import metadata_text
+from skill_control_plane.discovery.dense import metadata_text
 
 DEFAULT_BIGMODEL_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
 DEFAULT_BIGMODEL_EMBEDDING_MODEL = "embedding-3"

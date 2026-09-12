@@ -3,8 +3,8 @@ from copy import deepcopy
 
 from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillRegistry
-from skill_control_plane.retrieval.cards import RetrievalCard
-from skill_control_plane.retrieval.discovery import SkillDiscovery
+from skill_control_plane.discovery.cards import RetrievalCard
+from skill_control_plane.discovery.discovery import SkillDiscovery
 from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
 from skill_control_plane.runtime.capability_loading import ActiveBundle, RuntimeCapabilityState
 from skill_control_plane.runtime.experimental_agent import AGENT_INSTRUCTIONS, ExperimentalSkillAgent
@@ -35,13 +35,14 @@ def harness(body_state='resident'):
         'export presentations',
         'ninth bounded item',
     ), ('continue presentation work',))}
-    registry = SkillRegistry(records, retrieval_cards=cards)
+    registry = SkillRegistry(records)
     state = RuntimeCapabilityState(
         [ActiveBundle('presentation-work', 'Create and revise presentations',
                       ('powerpoint',))],
         skill_body_states={'powerpoint': body_state},
     )
-    return RuntimeCapabilityHarness(discovery=SkillDiscovery(registry), state=state)
+    return RuntimeCapabilityHarness(
+        discovery=SkillDiscovery(registry, retrieval_cards=cards), state=state)
 
 
 class Client:
@@ -97,7 +98,7 @@ def test_compact_capabilities_round_robin_members_and_remove_containment():
         'b': card('b', ('Export PDF', 'CREATE SLIDES', 'Validate PDF')),
     }
     runtime = RuntimeCapabilityHarness(
-        discovery=SkillDiscovery(SkillRegistry(records, retrieval_cards=cards)),
+        discovery=SkillDiscovery(SkillRegistry(records), retrieval_cards=cards),
         state=RuntimeCapabilityState([
             ActiveBundle('documents', 'Document work', ('b', 'a'))],
             skill_body_states={'a': 'resident', 'b': 'evicted'}),
@@ -115,7 +116,7 @@ def test_compact_capabilities_use_one_prioritized_fallback_representation():
     ]
     cards = {'use': card('use', (), ('use-when fallback',))}
     runtime = RuntimeCapabilityHarness(
-        discovery=SkillDiscovery(SkillRegistry(records, retrieval_cards=cards)),
+        discovery=SkillDiscovery(SkillRegistry(records), retrieval_cards=cards),
         state=RuntimeCapabilityState([
             ActiveBundle('fallbacks', 'Fallbacks', ('use', 'description'))],
             skill_body_states={'use': 'resident', 'description': 'resident'}),
@@ -136,10 +137,11 @@ def test_registry_from_tree_retains_structured_card_accessor(tmp_path):
     cards = {'powerpoint': RetrievalCard(
         'powerpoint', record.content_hash, 'presentations',
         ('when revising slides',), ('edit existing presentations',), ('slides',))}
-    registry = SkillRegistry.from_tree(tmp_path, cards=cards)
-    assert registry.capability_phrases('powerpoint') == (
+    registry = SkillRegistry.from_tree(tmp_path)
+    discovery = SkillDiscovery(registry, retrieval_cards=cards)
+    assert discovery.capability_phrases('powerpoint') == (
         'edit existing presentations', 'when revising slides')
-    assert registry.bundle_capability_phrases('powerpoint') == (
+    assert discovery.bundle_capability_phrases('powerpoint') == (
         'edit existing presentations',)
     assert registry.load_skill_body('powerpoint') == 'BODY'
 

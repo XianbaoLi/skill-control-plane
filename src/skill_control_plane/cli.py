@@ -33,7 +33,7 @@ from skill_control_plane.evals import (
     summarize_field_ablation_reports,
 )
 from skill_control_plane.registry import load_skill_tree
-from skill_control_plane.retrieval import (
+from skill_control_plane.discovery import (
     BM25Retriever,
     DEFAULT_BIGMODEL_EMBEDDING_DIMENSIONS,
     DEFAULT_BIGMODEL_EMBEDDING_MODEL,

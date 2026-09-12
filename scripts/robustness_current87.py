@@ -15,10 +15,10 @@ from skill_control_plane.evals.query_robustness import (
 )
 from skill_control_plane.evals.representation_ablation import RETRIEVAL_CARD_FIELD_ABLATIONS
 from skill_control_plane.registry import load_skill_tree
-from skill_control_plane.retrieval import BM25Retriever, BigModelDenseRetriever
-from skill_control_plane.retrieval.bigmodel import BigModelEmbeddingClient
-from skill_control_plane.retrieval.cards import apply_retrieval_cards, load_retrieval_cards
-from skill_control_plane.retrieval.dense import metadata_text
+from skill_control_plane.discovery import BM25Retriever, BigModelDenseRetriever
+from skill_control_plane.discovery.bigmodel import BigModelEmbeddingClient
+from skill_control_plane.discovery.cards import apply_retrieval_cards, load_retrieval_cards
+from skill_control_plane.discovery.dense import metadata_text
 
 BASE = Path('local_artifacts/v0.6')
 PREFIX = 'robustness-current87-13target-65query'

@@ -11,9 +11,9 @@ from tempfile import mkdtemp
 from skill_control_plane.cli import _validate_root_snapshot
 from skill_control_plane.corpus.bigmodel_chat import BigModelChatClient
 from skill_control_plane.registry import SkillRegistry
-from skill_control_plane.retrieval.bigmodel import BigModelDenseRetriever, BigModelEmbeddingClient
-from skill_control_plane.retrieval.cards import load_retrieval_cards
-from skill_control_plane.retrieval.discovery import SkillDiscovery
+from skill_control_plane.discovery.bigmodel import BigModelDenseRetriever, BigModelEmbeddingClient
+from skill_control_plane.discovery.cards import load_retrieval_cards
+from skill_control_plane.discovery.discovery import SkillDiscovery
 from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
 from skill_control_plane.runtime.experimental_agent import ExperimentalSkillAgent
 
@@ -186,7 +186,8 @@ def main():
 
     try:
         _validate_root_snapshot(str(ROOT), str(MANIFEST))
-        registry = SkillRegistry.from_tree(ROOT, cards=load_retrieval_cards(CARDS))
+        cards = load_retrieval_cards(CARDS)
+        registry = SkillRegistry.from_tree(ROOT)
         report['skill_count'] = len(registry)
         report['snapshot_id'] = json.loads(MANIFEST.read_text())['snapshot_id']
         chat = BigModelChatClient(timeout=60, max_tokens=8192)
@@ -195,9 +196,10 @@ def main():
                       dense_dimensions=embedding.dimensions)
         save()
         print('Building real Dense index...', flush=True)
-        discovery = SkillDiscovery(registry, dense_factory=lambda records: BigModelDenseRetriever(
-            records, model_name=embedding.model, dimensions=embedding.dimensions,
-            embed_batch=embedding))
+        discovery = SkillDiscovery(
+            registry, dense_factory=lambda records: BigModelDenseRetriever(
+                records, model_name=embedding.model, dimensions=embedding.dimensions,
+                embed_batch=embedding), retrieval_cards=cards)
         harness = RuntimeCapabilityHarness(discovery=discovery)
         agent = ExperimentalSkillAgent(harness, RecordingClient(chat), max_steps=args.max_steps)
         report['final'] = agent.run(args.task)

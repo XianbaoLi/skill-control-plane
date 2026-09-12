@@ -17,6 +17,7 @@ from .cards import (
     validate_retrieval_cards,
 )
 from .dense import DEFAULT_DENSE_MODEL, DenseRetriever, metadata_text
+from .discovery import SkillDiscovery, SkillDiscoveryResult, discover_skills
 from .fusion import candidate_union, reciprocal_rank_fusion
 
 __all__ = [
@@ -31,10 +32,13 @@ __all__ = [
     "RetrievalCard",
     "DenseRetriever",
     "Retriever",
+    "SkillDiscovery",
+    "SkillDiscoveryResult",
     "apply_retrieval_cards",
     "build_retrieval_card_cache",
     "build_retrieval_card_prompt",
     "candidate_union",
+    "discover_skills",
     "load_retrieval_cards",
     "metadata_text",
     "reciprocal_rank_fusion",

@@ -3,7 +3,7 @@ import json
 import pytest
 
 from skill_control_plane.models import SkillRecord
-from skill_control_plane.retrieval.cards import (
+from skill_control_plane.discovery.cards import (
     LLMRetrievalCardExtractor,
     RETRIEVAL_CARD_VERSION,
     apply_retrieval_cards,

@@ -19,7 +19,7 @@ from skill_control_plane.evals.control_plane import (
     load_multi_skill_gold, load_stage_transition_gold,
 )
 from skill_control_plane.models import SkillRecord
-from skill_control_plane.retrieval.discovery import SkillDiscovery
+from skill_control_plane.discovery.discovery import SkillDiscovery
 from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
 
 

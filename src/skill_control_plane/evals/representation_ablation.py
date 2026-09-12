@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from skill_control_plane.evals.control_plane import StageTransitionGoldCase
-from skill_control_plane.retrieval.cards import RETRIEVAL_CARD_FIELDS
+from skill_control_plane.discovery.cards import RETRIEVAL_CARD_FIELDS
 
 RETRIEVAL_CARD_FIELD_ABLATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("full", RETRIEVAL_CARD_FIELDS),

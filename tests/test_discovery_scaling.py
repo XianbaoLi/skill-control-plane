@@ -8,7 +8,7 @@ from skill_control_plane.evals.discovery_scaling import (
 )
 from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillRegistry
-from skill_control_plane.retrieval.discovery import SkillDiscovery
+from skill_control_plane.discovery.discovery import SkillDiscovery
 
 
 def call(name, arguments):

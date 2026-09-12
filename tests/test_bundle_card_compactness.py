@@ -4,8 +4,8 @@ from pathlib import Path
 
 from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillRegistry
-from skill_control_plane.retrieval.cards import RetrievalCard
-from skill_control_plane.retrieval.discovery import SkillDiscovery
+from skill_control_plane.discovery.cards import RetrievalCard
+from skill_control_plane.discovery.discovery import SkillDiscovery
 
 
 class Client:
@@ -31,7 +31,7 @@ def discovery():
         'powerpoint', 'hash', 'presentations', ('when editing slides',),
         ('create slides', 'edit layouts', 'render presentations',
          'export presentations', 'validate slides', 'extra capability'), ('ppt',))}
-    return SkillDiscovery(SkillRegistry(records, retrieval_cards=cards))
+    return SkillDiscovery(SkillRegistry(records), retrieval_cards=cards)
 
 
 def test_ab_agents_differ_only_in_bundle_surface():
@@ -105,8 +105,8 @@ def test_scaling_uses_realistic_fixed_bundles_and_compact_is_smaller():
             skill_id, 'hash', bundle.purpose, (f'use {skill_id}',),
             tuple(f'{skill_id} capability number {index}' for index in range(6)),
             (skill_id,))
-    rows = experiment.scaling_report(SkillDiscovery(SkillRegistry(
-        records, retrieval_cards=cards)))
+    rows = experiment.scaling_report(SkillDiscovery(
+        SkillRegistry(records), retrieval_cards=cards))
     assert [row['bundle_count'] for row in rows] == [1, 3, 5, 10]
     assert all(row['compact']['chars'] < row['old']['chars'] for row in rows)
     assert all(row['compact']['estimated_tokens_per_bundle']

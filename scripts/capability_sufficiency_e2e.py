@@ -12,8 +12,8 @@ from time import monotonic
 from skill_control_plane.cli import _validate_root_snapshot
 from skill_control_plane.corpus.bigmodel_chat import BigModelChatClient
 from skill_control_plane.registry import SkillRegistry
-from skill_control_plane.retrieval.cards import load_retrieval_cards
-from skill_control_plane.retrieval.discovery import SkillDiscovery
+from skill_control_plane.discovery.cards import load_retrieval_cards
+from skill_control_plane.discovery.discovery import SkillDiscovery
 from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
 from skill_control_plane.runtime.capability_loading import ActiveBundle, RuntimeCapabilityState
 from skill_control_plane.runtime.experimental_agent import ExperimentalSkillAgent
@@ -290,12 +290,12 @@ def main():
     try:
         _validate_root_snapshot(str(ROOT), str(MANIFEST))
         cards = load_retrieval_cards(CARDS)
-        full_registry = SkillRegistry.from_tree(ROOT, cards=cards)
+        full_registry = SkillRegistry.from_tree(ROOT)
         discoveries = {
-            'full': SkillDiscovery(full_registry),
-            'limited': SkillDiscovery(SkillRegistry(
-                [full_registry.get(skill_id) for skill_id in LIMITED_IDS],
-                retrieval_cards={skill_id: cards[skill_id] for skill_id in LIMITED_IDS})),
+            'full': SkillDiscovery(full_registry, retrieval_cards=cards),
+            'limited': SkillDiscovery(
+                SkillRegistry([full_registry.get(skill_id) for skill_id in LIMITED_IDS]),
+                retrieval_cards={skill_id: cards[skill_id] for skill_id in LIMITED_IDS}),
         }
         glm = BigModelChatClient(timeout=60, max_tokens=4096)
         report['model'] = glm.model

@@ -1,5 +1,5 @@
 from skill_control_plane.models import SkillRecord
-from skill_control_plane.retrieval import BM25Retriever
+from skill_control_plane.discovery import BM25Retriever
 
 
 def _skill(skill_id: str, description: str, body: str) -> SkillRecord:

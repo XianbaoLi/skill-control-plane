@@ -8,7 +8,7 @@ from skill_control_plane.evals.control_plane import (
     StageTransitionGoldCase,
 )
 from skill_control_plane.models import RetrievalCandidate, SkillRecord
-from skill_control_plane.retrieval import candidate_union
+from skill_control_plane.discovery import candidate_union
 from skill_control_plane.runtime.bundles import (
     CapabilityShelf,
     GroupKey,

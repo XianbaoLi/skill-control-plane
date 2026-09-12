@@ -4,7 +4,7 @@ from enum import StrEnum
 
 from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry.bundles import Bundle, BundleRegistry
-from skill_control_plane.retrieval.discovery import SkillDiscovery, SkillDiscoveryResult
+from skill_control_plane.discovery.discovery import SkillDiscovery, SkillDiscoveryResult
 
 
 class Decision(StrEnum):

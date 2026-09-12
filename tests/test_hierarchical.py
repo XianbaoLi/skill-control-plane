@@ -127,7 +127,7 @@ def test_ab_global_arm_preserves_existing_evaluator():
 
 
 def test_dense_matcher_uses_only_registered_metadata_and_reuses_encoder():
-    from skill_control_plane.retrieval.dense import DenseRetriever
+    from skill_control_plane.discovery.dense import DenseRetriever
     from skill_control_plane.runtime.hierarchical import dense_factory_for
     records = {r.skill_id: r for r in [record('known', 'code'), record('debug', 'code'), record('mail', 'email')]}
     class Encoder:

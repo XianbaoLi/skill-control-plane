@@ -8,9 +8,9 @@ from skill_control_plane.capability_loading import (
 from skill_control_plane.models import SkillRecord
 from skill_control_plane.registry import SkillRegistry
 from skill_control_plane.registry.bundles import Bundle, BundleRegistry
-from skill_control_plane.retrieval.cards import RetrievalCard, apply_retrieval_cards
-from skill_control_plane.retrieval.dense import DenseRetriever, metadata_text
-from skill_control_plane.retrieval.discovery import SkillDiscovery, discover_skills
+from skill_control_plane.discovery.cards import RetrievalCard, apply_retrieval_cards
+from skill_control_plane.discovery.dense import DenseRetriever, metadata_text
+from skill_control_plane.discovery.discovery import SkillDiscovery, discover_skills
 
 
 def registry():
@@ -53,10 +53,10 @@ def test_registration_cards_and_hash_validation(tmp_path):
     skill = raw.get('a')
     card = RetrievalCard('a', skill.content_hash, 'convert quasar', ('quasar input',), ('quasar',), ('quasar',))
     cards = {'a': card}
-    registered = SkillRegistry.from_tree(tmp_path, cards=cards)
+    registered = SkillRegistry.from_tree(tmp_path)
     assert registered.get('a').body == 'Original body'
-    assert registered.get('a').retrieval_representation == metadata_text(apply_retrieval_cards(raw, cards)[0])
-    discovery = SkillDiscovery(registered)
+    discovery = SkillDiscovery(registered, retrieval_cards=cards)
+    assert discovery.texts['a'] == metadata_text(apply_retrieval_cards(raw, cards)[0])
     (path / 'SKILL.md').write_text('changed')
     for _ in range(2):
         result = discover_skills('quasar', discovery=discovery)
@@ -64,7 +64,7 @@ def test_registration_cards_and_hash_validation(tmp_path):
         assert 'quasar' in result.representations[0][1]
         assert result.candidates[0].evidence
     with pytest.raises(ValueError, match='corpus mismatch'):
-        SkillRegistry.from_tree(tmp_path, cards=cards)
+        SkillDiscovery.from_tree(tmp_path, cards=cards)
 
 
 def test_shared_membership_and_ambiguity():

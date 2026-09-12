@@ -14,7 +14,7 @@ from skill_control_plane.evals.representation_ablation import (
 )
 from skill_control_plane.corpus import write_corpus_manifest
 from skill_control_plane.models import RetrievalCandidate, SkillRecord
-from skill_control_plane.retrieval.cards import RetrievalCard, apply_retrieval_cards
+from skill_control_plane.discovery.cards import RetrievalCard, apply_retrieval_cards
 
 
 class MappingSearch:

@@ -10,8 +10,8 @@ from tempfile import mkdtemp
 from skill_control_plane.cli import _validate_root_snapshot
 from skill_control_plane.corpus.bigmodel_chat import BigModelChatClient
 from skill_control_plane.registry import SkillRegistry
-from skill_control_plane.retrieval.cards import load_retrieval_cards
-from skill_control_plane.retrieval.discovery import SkillDiscovery
+from skill_control_plane.discovery.cards import load_retrieval_cards
+from skill_control_plane.discovery.discovery import SkillDiscovery
 from skill_control_plane.runtime.capability_harness import RuntimeCapabilityHarness
 from skill_control_plane.runtime.experimental_agent import ExperimentalSkillAgent
 
@@ -55,8 +55,10 @@ def main():
 
     try:
         _validate_root_snapshot(str(ROOT), str(MANIFEST))
-        registry = SkillRegistry.from_tree(ROOT, cards=load_retrieval_cards(CARDS))
-        harness = RuntimeCapabilityHarness(discovery=SkillDiscovery(registry))
+        cards = load_retrieval_cards(CARDS)
+        registry = SkillRegistry.from_tree(ROOT)
+        harness = RuntimeCapabilityHarness(
+            discovery=SkillDiscovery(registry, retrieval_cards=cards))
         chat = BigModelChatClient(timeout=60, max_tokens=4096)
         powerpoint_body = registry.load_skill_body('powerpoint')
         wire_audit = []

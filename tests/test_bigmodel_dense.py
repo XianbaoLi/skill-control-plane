@@ -1,5 +1,5 @@
 from skill_control_plane.models import SkillRecord
-from skill_control_plane.retrieval.bigmodel import BigModelDenseRetriever
+from skill_control_plane.discovery.bigmodel import BigModelDenseRetriever
 
 
 def _skill(skill_id: str, name: str, description: str) -> SkillRecord:
@@ -40,7 +40,7 @@ def test_bigmodel_dense_retriever_uses_cosine_and_metadata_only():
 
 
 def test_embedding_does_not_inherit_chat_coding_endpoint(monkeypatch):
-    from skill_control_plane.retrieval.bigmodel import BigModelEmbeddingClient
+    from skill_control_plane.discovery.bigmodel import BigModelEmbeddingClient
     monkeypatch.setenv('BIGMODEL_BASE_URL', 'https://open.bigmodel.cn/api/coding/paas/v4')
     monkeypatch.setenv('BIGMODEL_API_KEY', 'test-only-key')
     monkeypatch.delenv('BIGMODEL_EMBEDDING_BASE_URL', raising=False)
@@ -51,7 +51,7 @@ def test_embedding_does_not_inherit_chat_coding_endpoint(monkeypatch):
 
 
 def test_embedding_specific_configuration_and_explicit_precedence(monkeypatch):
-    from skill_control_plane.retrieval.bigmodel import BigModelEmbeddingClient
+    from skill_control_plane.discovery.bigmodel import BigModelEmbeddingClient
     monkeypatch.setenv('BIGMODEL_EMBEDDING_BASE_URL', 'https://embedding.example.test/v4/')
     monkeypatch.setenv('BIGMODEL_EMBEDDING_API_KEY', 'embedding-test-key')
     client = BigModelEmbeddingClient()
@@ -63,7 +63,7 @@ def test_embedding_specific_configuration_and_explicit_precedence(monkeypatch):
 
 
 def test_paratera_and_embedding_model_configuration_take_precedence(monkeypatch):
-    from skill_control_plane.retrieval.bigmodel import BigModelEmbeddingClient
+    from skill_control_plane.discovery.bigmodel import BigModelEmbeddingClient
     monkeypatch.setenv('PARATERA_API_KEY', 'paratera-test-key')
     monkeypatch.setenv('BIGMODEL_EMBEDDING_API_KEY', 'legacy-embedding-key')
     monkeypatch.setenv('BIGMODEL_EMBEDDING_MODEL', 'GLM-Embedding-3')

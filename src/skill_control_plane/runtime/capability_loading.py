@@ -7,7 +7,7 @@ from typing import Literal
 from uuid import uuid4
 
 from skill_control_plane.corpus.bigmodel_chat import BigModelChatClient
-from skill_control_plane.retrieval.discovery import SkillDiscovery, SkillDiscoveryResult
+from skill_control_plane.discovery.discovery import SkillDiscovery, SkillDiscoveryResult
 from skill_control_plane.runtime.llm_context import TextCompleter
 
 

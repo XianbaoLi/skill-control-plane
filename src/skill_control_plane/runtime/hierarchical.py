@@ -5,9 +5,9 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from skill_control_plane.models import RetrievalCandidate, SkillRecord
-from skill_control_plane.retrieval import BM25Retriever, DenseRetriever, candidate_union
-from skill_control_plane.retrieval.base import Retriever
-from skill_control_plane.retrieval.dense import metadata_text
+from skill_control_plane.discovery import BM25Retriever, DenseRetriever, candidate_union
+from skill_control_plane.discovery.base import Retriever
+from skill_control_plane.discovery.dense import metadata_text
 from skill_control_plane.runtime.bundles import CapabilityShelf, default_group_key
 
 RetrieverFactory = Callable[[Sequence[SkillRecord]], Retriever]

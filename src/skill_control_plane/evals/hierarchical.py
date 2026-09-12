@@ -12,7 +12,7 @@ from skill_control_plane.runtime.bundles import (
     default_group_key,
 )
 from skill_control_plane.runtime.hierarchical import ShelfAwareRetriever, RetrieverFactory
-from skill_control_plane.retrieval.base import Retriever
+from skill_control_plane.discovery.base import Retriever
 from skill_control_plane.runtime.capability_need import CapabilityNeedExtractor, extract_query
 
 

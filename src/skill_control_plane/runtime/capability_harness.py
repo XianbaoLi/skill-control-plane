@@ -5,7 +5,7 @@ import json
 import re
 from dataclasses import asdict, replace
 
-from skill_control_plane.retrieval.discovery import SkillDiscovery, SkillDiscoveryResult
+from skill_control_plane.discovery.discovery import SkillDiscovery, SkillDiscoveryResult
 from .capability_loading import (
     CapabilityLoadResult, RuntimeCapabilityLoader, RuntimeCapabilityState,
     apply_decision, validate_decision, validate_state,
@@ -258,7 +258,7 @@ class RuntimeCapabilityHarness:
 
         # Read before committing the state transition so a store failure leaves
         # both membership and residency unchanged.
-        body = self.discovery.load_skill_body(skill_id)
+        body = self.discovery.registry.load_skill_body(skill_id)
         self.body_load_count += 1
         self.state.skill_body_states[skill_id] = 'resident'
         return {'status': 'loaded', 'skill_id': skill_id,

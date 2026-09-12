@@ -1,9 +1,9 @@
-"""Stable discovery over the existing representation, BM25, Dense and RRF."""
+"""Single-search Capability Discovery over Retrieval Cards, BM25, Dense and RRF."""
 from dataclasses import dataclass, replace
 from collections.abc import Callable, Sequence
 
 from skill_control_plane.models import RetrievalCandidate, SkillRecord
-from skill_control_plane.registry import SkillRegistry
+from skill_control_plane.registry import SkillStore
 from .base import Retriever
 from .bm25 import BM25Retriever
 from .dense import metadata_text
@@ -22,35 +22,73 @@ class SkillDiscoveryResult:
 class SkillDiscovery:
     """Immutable index snapshot. Optional dense_factory receives identical text."""
 
-    def __init__(self, registry: SkillRegistry, *,
+    def __init__(self, registry: SkillStore, *,
                  dense_factory: Callable[[Sequence[SkillRecord]], Retriever] | None = None,
-                 source_k: int = 10):
+                 source_k: int = 10, retrieval_cards=None):
         if source_k < 1:
             raise ValueError("source_k must be positive")
         self.source_k = source_k
         self.registry = registry
+        self.retrieval_cards = dict(retrieval_cards or {})
         self.records = {s.skill_id: s for s in registry}
-        self.texts = {s.skill_id: s.retrieval_representation or metadata_text(s)
-                      for s in registry}
+        records = tuple(registry)
+        if self.retrieval_cards:
+            indexed_records = tuple(
+                replace(
+                    skill,
+                    description="\n".join(part for part in (
+                        skill.description,
+                        self.retrieval_cards[skill.skill_id].augmentation_text(),
+                    ) if part),
+                    body="",
+                ) if skill.skill_id in self.retrieval_cards else skill
+                for skill in records
+            )
+        else:
+            indexed_records = records
+        self.texts = {
+            skill.skill_id: indexed.retrieval_representation or metadata_text(indexed)
+            for skill, indexed in zip(records, indexed_records, strict=True)
+        }
         indexed = tuple(replace(s, name="", description=self.texts[s.skill_id],
                                 tags=(), body="") for s in registry)
         self.bm25 = BM25Retriever(indexed)
         self.dense = dense_factory(indexed) if dense_factory else None
 
-    def load_skill_body(self, skill_id: str) -> str:
-        """Delegate an exact body read to the canonical Skill store."""
-
-        return self.registry.load_skill_body(skill_id)
-
     def capability_phrases(self, skill_id: str) -> tuple[str, ...]:
-        """Expose offline structured coverage metadata without searching."""
+        """Expose structured Retrieval Card coverage without searching."""
 
-        return self.registry.capability_phrases(skill_id)
+        self.registry.get(skill_id)
+        card = self.retrieval_cards.get(skill_id)
+        if card is None:
+            return ()
+        return tuple((*card.capabilities, *card.use_when))
 
     def bundle_capability_phrases(self, skill_id: str) -> tuple[str, ...]:
         """Expose the prioritized compact Bundle representation without searching."""
 
-        return self.registry.bundle_capability_phrases(skill_id)
+        record = self.registry.get(skill_id)
+        card = self.retrieval_cards.get(skill_id)
+        if card is not None:
+            if card.capabilities:
+                return tuple(card.capabilities)
+            if card.use_when:
+                return tuple(card.use_when)
+        description = " ".join(record.description.split()).strip()
+        return (description,) if description else ()
+
+    @classmethod
+    def from_tree(cls, root, *, cards=None, dense_factory=None,
+                  source_k: int = 10) -> "SkillDiscovery":
+        """Build a Skill Store and its separate discovery index."""
+
+        store = SkillStore.from_tree(root)
+        if cards is not None:
+            from .cards import validate_retrieval_cards
+
+            validate_retrieval_cards(store, cards)
+        return cls(store, dense_factory=dense_factory,
+                   source_k=source_k, retrieval_cards=cards)
 
     def discover_skills(self, query: str, k: int = 5) -> SkillDiscoveryResult:
         if not query.strip() or k < 1:
