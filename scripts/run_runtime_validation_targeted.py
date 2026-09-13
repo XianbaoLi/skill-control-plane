@@ -307,6 +307,8 @@ def main() -> int:
         write_status(output, head, statuses)
         env = os.environ.copy(); env.update(credentials)
         env["PI_AGENT_DIR"] = str(output / "pi-agent" / identifier.replace(":", "-"))
+        # benchmark_run imports the in-tree src-layout package directly.
+        env["PYTHONPATH"] = str(ROOT / "src") + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         env["BENCHMARK_TIMEOUT_SECONDS"] = str(TIMEOUT_SECONDS)
         env["BENCHMARK_MAX_TURNS"] = str(MAX_TURNS)
         command = [str(ROOT / ".venv/bin/python"), "scripts/benchmark_run.py", "one", "--task", str(cell["task_id"]),
