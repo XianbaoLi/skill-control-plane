@@ -131,6 +131,9 @@ let currentTurn = null;
 const maxTurns = Number(process.env.BENCHMARK_MAX_TURNS || 20);
 const reasoning = process.env.BENCHMARK_REASONING || undefined;
 const record = event => events.push({ event_seq: ++eventSeq, turn_id: currentTurn, ...event });
+const toolStarts = new Map();
+const isGatedVerifierCommand = command => typeof command === 'string' &&
+  /(?:^|[\s;&|])(?:python3?|\S+\/python3?)\s+tests\/check_all\.py(?:\s|$)/.test(command);
 const resultPayload = value => {
   if (value && typeof value === 'object') return value;
   if (typeof value !== 'string') return null;
@@ -139,6 +142,7 @@ const resultPayload = value => {
 const subscribe = session => session.subscribe(event => {
   if (event.type === 'tool_execution_start') {
     record({ type: 'tool_call', tool: event.toolName, args: event.args });
+    if (event.toolCallId) toolStarts.set(event.toolCallId, { tool: event.toolName, args: event.args });
     if (event.toolName === 'load_capability') {
       record({ type: 'capability_search', query: event.args?.need });
       const gap = [...events].reverse().find(item => item.type === 'capability_gap_check' && item.needs_capability);
@@ -193,9 +197,16 @@ const subscribe = session => session.subscribe(event => {
       record({ type: 'skill_body_load', skill_id: result.skill_id,
         source: 'load_skill_body', status: 'loaded' });
     }
-    const rendered = resultText ?? '';
-    for (const match of rendered.matchAll(/BENCHMARK_EVIDENCE:([A-Za-z0-9_-]+)/g)) {
-      record({ type: 'evidence_emitted', event_id: match[1], marker: match[0] });
+    const producer = event.message.toolCallId ? toolStarts.get(event.message.toolCallId) : undefined;
+    // A marker in `read`, `cat`, or any other source-reading result is not
+    // runtime evidence.  The only admissible producer is the gated verifier
+    // client command, and its provenance is retained in the trace.
+    if (producer?.tool === 'bash' && isGatedVerifierCommand(producer.args?.command)) {
+      const rendered = resultText ?? '';
+      for (const match of rendered.matchAll(/BENCHMARK_EVIDENCE:([A-Za-z0-9_-]+)/g)) {
+        record({ type: 'evidence_emitted', event_id: match[1], marker: match[0],
+          source: 'gated_verifier_execution', producer: { tool: 'bash', command: producer.args.command } });
+      }
     }
   }
   if (event.type === 'message_end' && event.message.role === 'assistant') {

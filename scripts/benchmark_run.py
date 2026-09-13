@@ -55,6 +55,8 @@ def main() -> int:
     run.add_argument("--bridge-command")
     run.add_argument("--capability-memory-restore", choices=("on", "off"), default="on",
                      help="explicit CapabilityMemory restore ablation setting")
+    run.add_argument("--timeout-seconds", type=int, default=300,
+                     help="per-cell wall clock limit (targeted validation passes 600)")
     report = sub.add_parser("report")
     report.add_argument("--results", type=Path, required=True)
     report.add_argument("--suite", choices=("scaling", "runtime"), required=True)
@@ -80,14 +82,15 @@ def main() -> int:
       row = run_one(task=task, arm=args.arm, corpus=args.corpus, model=args.model,
                   fixture_spec=fixtures[task["fixture"]], output=args.output,
                   command=resolve_bridge(args.bridge_command, production=args.production),
-                  provider=args.provider)
+                  provider=args.provider, timeout_seconds=args.timeout_seconds)
     finally:
       if restore_before is None:
           os.environ.pop("SKILL_CONTROL_PLANE_RESTORE_ENABLED", None)
       else:
           os.environ["SKILL_CONTROL_PLANE_RESTORE_ENABLED"] = restore_before
     print(json.dumps(row, ensure_ascii=False, indent=2))
-    return 0
+    # Do not turn a failed gated verifier into a successful outer tool result.
+    return 0 if row["task_success"] else 1
 
 
 if __name__ == "__main__":
