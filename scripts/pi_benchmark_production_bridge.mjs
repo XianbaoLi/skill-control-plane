@@ -141,10 +141,15 @@ const subscribe = session => session.subscribe(event => {
     record({ type: 'tool_call', tool: event.toolName, args: event.args });
     if (event.toolName === 'load_capability') {
       record({ type: 'capability_search', query: event.args?.need });
+      const gap = [...events].reverse().find(item => item.type === 'capability_gap_check' && item.needs_capability);
+      if (gap) record({ type: 'post_evidence_search', evidence_fingerprint: gap.evidence_fingerprint, query: event.args?.need });
     }
     if (event.toolName === 'apply_capability') {
       record({ type: 'capability_apply_request', skill_ids: event.args?.skill_ids ?? [],
         requested_action: event.args?.action });
+    }
+    if (event.toolName === 'capability_gap_check') {
+      record({ type: 'capability_gap_check_requested' });
     }
     if (event.toolName === 'read' && String(event.args?.path).includes('/skills/')) {
       record({ type: 'capability_activation',
@@ -181,6 +186,9 @@ const subscribe = session => session.subscribe(event => {
           source: 'apply_capability', status: 'loaded' });
       }
     }
+    if (toolName === 'capability_gap_check' && result) {
+      record({ type: 'capability_gap_check', ...result });
+    }
     if (toolName === 'load_skill_body' && result?.status === 'loaded') {
       record({ type: 'skill_body_load', skill_id: result.skill_id,
         source: 'load_skill_body', status: 'loaded' });
@@ -216,7 +224,7 @@ const createSession = async (manager, reason = 'startup', previousSessionFile) =
     ...(reasoning ? { thinkingLevel: reasoning } : {}),
     tools: arm === 'native'
       ? ['read', 'write', 'edit', 'bash']
-      : ['read', 'write', 'edit', 'bash', 'load_capability', 'apply_capability', 'load_skill_body'],
+      : ['read', 'write', 'edit', 'bash', 'capability_gap_check', 'load_capability', 'apply_capability', 'load_skill_body'],
     sessionStartEvent: { type: 'session_start', reason, previousSessionFile },
   });
   subscribe(created.session);

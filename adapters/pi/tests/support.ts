@@ -215,6 +215,7 @@ export const typeboxStub = {
     Optional: (schema: unknown) => ({ optional: schema }),
     String: (options?: Record<string, unknown>) => ({ string: options }),
     Integer: (options?: Record<string, unknown>) => ({ integer: options }),
+    Boolean: () => ({ boolean: true }),
     Array: (schema: unknown, options?: Record<string, unknown>) => ({ array: schema, options }),
   },
 };
