@@ -129,7 +129,8 @@ export class SidecarClient {
       this.process = null;
       this.connected = false;
       this.handshake = null;
-      this.failPending(new SidecarError("NOT_READY", "sidecar process exited"));
+      const diagnostics = this.stderrLines.length ? `: ${this.stderrLines.join("\\n")}` : "";
+      this.failPending(new SidecarError("NOT_READY", `sidecar process exited${diagnostics}`));
     });
 
     try {

@@ -53,6 +53,8 @@ def main() -> int:
                      help="use the real configured Pi provider/model bridge")
     run.add_argument("--output", type=Path, required=True)
     run.add_argument("--bridge-command")
+    run.add_argument("--capability-memory-restore", choices=("on", "off"), default="on",
+                     help="explicit CapabilityMemory restore ablation setting")
     report = sub.add_parser("report")
     report.add_argument("--results", type=Path, required=True)
     report.add_argument("--suite", choices=("scaling", "runtime"), required=True)
@@ -72,10 +74,18 @@ def main() -> int:
     else:
         args.model = args.model or "benchmark-faux-1"
     fixtures = json.loads((BENCH / "fixtures.json").read_text(encoding="utf-8"))
-    row = run_one(task=task, arm=args.arm, corpus=args.corpus, model=args.model,
+    restore_before = os.environ.get("SKILL_CONTROL_PLANE_RESTORE_ENABLED")
+    os.environ["SKILL_CONTROL_PLANE_RESTORE_ENABLED"] = "1" if args.capability_memory_restore == "on" else "0"
+    try:
+      row = run_one(task=task, arm=args.arm, corpus=args.corpus, model=args.model,
                   fixture_spec=fixtures[task["fixture"]], output=args.output,
                   command=resolve_bridge(args.bridge_command, production=args.production),
                   provider=args.provider)
+    finally:
+      if restore_before is None:
+          os.environ.pop("SKILL_CONTROL_PLANE_RESTORE_ENABLED", None)
+      else:
+          os.environ["SKILL_CONTROL_PLANE_RESTORE_ENABLED"] = restore_before
     print(json.dumps(row, ensure_ascii=False, indent=2))
     return 0
 

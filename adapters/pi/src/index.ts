@@ -76,7 +76,7 @@ export class PiSidecarAdapter {
     this.client = sidecar;
     try {
       await sidecar.start();
-      const snapshot = this.latestSnapshot(ctx);
+      const snapshot = this.restoreEnabled() ? this.latestSnapshot(ctx) : null;
       if (snapshot !== null) {
         await this.requireSidecar().request("restore_state", snapshot);
       }
@@ -100,6 +100,12 @@ export class PiSidecarAdapter {
       return entry.data as Record<string, unknown>;
     }
     return null;
+  }
+
+  private restoreEnabled(): boolean {
+    // Explicitly supports the benchmark restore ON/OFF ablation.  Production
+    // remains restore-on by default; only the literal "0" opts out.
+    return process.env.SKILL_CONTROL_PLANE_RESTORE_ENABLED !== "0";
   }
 
   async handleTurnStart(): Promise<void> {
@@ -195,23 +201,43 @@ export class PiSidecarAdapter {
     pi.registerTool({
       name: "apply_capability",
       label: "Apply capability",
-      description: "Commit selected Skills into the current Capability Bundle after load_capability.",
+      description: "Commit selected Skills after load_capability. CREATE requires purpose and creates a Bundle; EXTEND and DIRECT require target_bundle_id and must not include purpose.",
+      // Some OpenAI-compatible providers emit `{}` for JSON-schema unions.
+      // Keep the provider-facing shape a plain object and put the conditional
+      // contract in the description; the sidecar remains the strict validator.
       parameters: Type.Object({
         action: Type.String({ enum: ["DIRECT", "EXTEND", "CREATE"] }),
         skill_ids: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
         reason: Type.String({ minLength: 1 }),
-        target_bundle_id: Type.Optional(Type.String({ minLength: 1 })),
-        purpose: Type.Optional(Type.String({ minLength: 1 })),
+        target_bundle_id: Type.Optional(Type.String({ minLength: 1,
+          description: "Required for EXTEND and DIRECT; omit for CREATE." })),
+        purpose: Type.Optional(Type.String({ minLength: 1,
+          description: "Required for CREATE; omit for EXTEND and DIRECT." })),
         coverage: Type.Optional(Type.Array(Type.Object({
           need: Type.String({ minLength: 1 }),
           covered_by: Type.String({ minLength: 1 }),
         }))),
         remaining_gaps: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
-      }),
+      }, { additionalProperties: false }),
       execute: async (_toolCallId: string, params: Record<string, unknown>) => {
-        const result = await this.executeTool("apply_capability", params);
+        const applied = await this.requireSidecar().request<Record<string, unknown>>(
+          "apply_capability", params,
+        );
+        const snapshot = await this.requireSidecar().request<Parameters<typeof formatRuntimePolicy>[0]>(
+          "context_snapshot", { compact: true },
+        );
+        const bundleId = typeof applied.affected_bundle_id === "string"
+          ? applied.affected_bundle_id : null;
+        const bundle = bundleId === null ? null : snapshot.maintained_bundles
+          .find((candidate) => candidate.bundle_id === bundleId) ?? null;
+        // The immediate tool result is the stable, canonical target for a
+        // same-turn EXTEND/DIRECT; it must not depend on a later policy refresh.
+        const result = {
+          ...applied,
+          bundle_target: bundleId === null ? null : { bundle_id: bundleId, bundle },
+        };
         await this.persistState();
-        return result;
+        return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
       },
     });
 

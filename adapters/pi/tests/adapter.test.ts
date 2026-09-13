@@ -46,6 +46,15 @@ test("registers three LLM tools and maps them to sidecar methods", async () => {
   assert.match(loaded.content[0].text, /BODY/);
 });
 
+test("apply schema makes action-dependent fields unambiguous", () => {
+  const { pi } = createAdapter(new RecordingSidecar());
+  const tool = pi.tools.get("apply_capability");
+  assert.match(tool.description, /EXTEND.*target_bundle_id/);
+  assert.deepEqual(tool.parameters.fields.action.string.enum, ["DIRECT", "EXTEND", "CREATE"]);
+  assert.match(tool.parameters.fields.target_bundle_id.optional.string.description, /EXTEND/);
+  assert.match(tool.parameters.fields.purpose.optional.string.description, /CREATE/);
+});
+
 test("lifecycle maps to sidecar begin, end, compact and shutdown methods", async () => {
   const sidecar = new RecordingSidecar();
   const { adapter, pi } = createAdapter(sidecar);
@@ -127,13 +136,22 @@ test("restores latest valid custom state and appends state after apply", async (
     skill_bodies: [{ skill_id: "release-notes", body: "BODY" }],
   });
   sidecar.responses.set("export_state", snapshot);
-  await pi.tools.get("apply_capability").execute("call", {
+  sidecar.responses.set("context_snapshot", {
+    maintained_bundles: [{ bundle_id: "cap-new", purpose: "Writing", capabilities: ["release notes"],
+      members: [{ skill_id: "release-notes", name: "Release notes", member_role: "maintained", body_state: "resident", short_description: "notes" }] }],
+    remaining_search_budget: 2,
+  });
+  const result = await pi.tools.get("apply_capability").execute("call", {
     action: "CREATE",
     skill_ids: ["release-notes"],
     reason: "reusable writing work",
     purpose: "Writing",
     coverage: [{ need: "release notes", covered_by: "skill:release-notes" }],
   });
+  const visible = JSON.parse(result.content[0].text);
+  assert.equal(visible.affected_bundle_id, "cap-new");
+  assert.equal(visible.bundle_target.bundle_id, "cap-new");
+  assert.equal(visible.bundle_target.bundle.members[0].skill_id, "release-notes");
   assert.equal(pi.entries.at(-1)?.customType, "skill-control-plane/state-v1");
   assert.deepEqual(pi.entries.at(-1)?.data, snapshot);
 });
@@ -146,6 +164,22 @@ test("invalid latest state fails closed and shuts sidecar down", async () => {
   await assert.rejects(adapter.handleSessionStart(ctx), /invalid Skill Control Plane state/);
   assert.match(ctx.notifications[0], /startup failed/);
   assert.equal(sidecar.stopped, true);
+});
+
+test("restore ablation can start a resumed Pi session without CapabilityMemory", async () => {
+  const previous = process.env.SKILL_CONTROL_PLANE_RESTORE_ENABLED;
+  process.env.SKILL_CONTROL_PLANE_RESTORE_ENABLED = "0";
+  try {
+    const sidecar = new RecordingSidecar();
+    const { adapter } = createAdapter(sidecar);
+    const ctx = new FakeContext();
+    ctx.entries.push({ type: "custom", customType: "skill-control-plane/state-v1", data: { version: "wrong" } });
+    await adapter.handleSessionStart(ctx);
+    assert.equal(sidecar.calls.some((call) => call.method === "restore_state"), false);
+  } finally {
+    if (previous === undefined) delete process.env.SKILL_CONTROL_PLANE_RESTORE_ENABLED;
+    else process.env.SKILL_CONTROL_PLANE_RESTORE_ENABLED = previous;
+  }
 });
 
 test("failed compaction does not evict Skill bodies", async () => {

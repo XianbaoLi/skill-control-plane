@@ -33,6 +33,8 @@ def _result(**updates):
         "reroute_success": None, "new_required_skill_recall": None,
         "premature_activation_count": 0, "bundle_create_count": None,
         "bundle_extend_count": None, "bundle_reuse_count": None,
+        "rediscovery_avoided": None, "reactivation_avoided": None,
+        "behavioral_effective_reuse": None,
         "session_restore_success": None, "llm_input_tokens": 10, "llm_output_tokens": 2,
         "llm_total_tokens": 12, "cached_tokens": None,
         "query_embedding_calls_startup": 0, "query_embedding_calls_runtime": 0,

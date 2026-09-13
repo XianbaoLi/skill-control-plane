@@ -241,6 +241,28 @@ def test_apply_rejects_unknown_fields_and_invalid_coverage(server):
         "purpose": "x", "coverage": [], "unknown": True,
     })
     assert response["error"]["code"] == "INVALID_PARAMS"
+
+
+def test_extend_contract_reports_the_rt_t02_parameter_errors(server):
+    """The sidecar remains a clear backstop if a provider bypasses Pi's schema."""
+    created = _create(server)
+    _call(server, "begin_turn")
+    _search(server, "extract scanned text")
+    missing_target = _call(server, "apply_capability", {
+        "action": "EXTEND", "skill_ids": ["ocr"], "reason": "add OCR",
+    })
+    assert missing_target["error"] == {
+        "code": "INVALID_PARAMS",
+        "message": "target_bundle_id must be a non-empty string",
+    }
+    invalid_purpose = _call(server, "apply_capability", {
+        "action": "EXTEND", "skill_ids": ["ocr"], "reason": "add OCR",
+        "target_bundle_id": created["affected_bundle_id"],
+        "purpose": "must not be supplied by EXTEND",
+    })
+    assert invalid_purpose["error"] == {
+        "code": "INVALID_PARAMS", "message": "EXTEND cannot set purpose",
+    }
     response = _call(server, "apply_capability", {
         "action": "CREATE", "skill_ids": ["slides"], "reason": "x",
         "purpose": "x", "coverage": [{"need": "x"}],

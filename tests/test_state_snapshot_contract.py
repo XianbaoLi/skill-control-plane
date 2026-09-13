@@ -76,6 +76,27 @@ def test_state_snapshot_v1_round_trips_persistent_memory(runtime):
     assert restored.load_skill_body("ocr").body == "OCR BODY"
 
 
+def test_restored_active_member_can_lazy_load_without_turn_local_discovery(runtime):
+    runtime.begin_turn()
+    runtime.search_capability("create slides")
+    runtime.apply_capability(CapabilityDecision(
+        action="CREATE", skill_ids=("slides",), reason="presentation work",
+        purpose="Presentation", coverage=(CoverageClaim("slides", "skill:slides"),),
+    ))
+    runtime.mark_skill_body_evicted("slides")
+    snapshot = runtime.export_state()
+
+    restored_store = _store()
+    restored = SkillControlPlane(restored_store, discovery=full_discovery(restored_store))
+    restored.restore_state(snapshot)
+    restored.begin_turn()  # T2: no search or apply
+
+    loaded = restored.load_skill_body("slides")
+    assert loaded.status == "loaded" and loaded.body == "SLIDE BODY"
+    with pytest.raises(ValueError, match="current Bundle member"):
+        restored.load_skill_body("ocr")
+
+
 def test_export_contains_only_persistent_bundle_memory(runtime):
     runtime.begin_turn()
     runtime.search_capability("create slides")

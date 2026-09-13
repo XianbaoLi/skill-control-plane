@@ -326,6 +326,16 @@ const trace = {
   bundle_reuse_count: applyResults.reduce(
     (count, result) => count + (result.deduplicated_skill_ids?.length ?? 0), 0),
   session_restore_success: turns.length ? events.some(event => event.type === 'session_restored') : null,
+  // Behavioral reuse measures observable follow-up behavior, not merely a
+  // deduplicated apply counter.  It is meaningful only for resumed tasks.
+  rediscovery_avoided: arm === 'control-plane' && turns.length
+    ? !searches.some(event => event.turn_id === turns[1]?.turn_id) : null,
+  reactivation_avoided: arm === 'control-plane' && turns.length
+    ? !activations.some(event => event.turn_id === turns[1]?.turn_id) : null,
+  behavioral_effective_reuse: arm === 'control-plane' && turns.length
+    ? Boolean(events.some(event => event.type === 'session_restored')) &&
+      !searches.some(event => event.turn_id === turns[1]?.turn_id) &&
+      !activations.some(event => event.turn_id === turns[1]?.turn_id) : null,
   turn_metrics: turnMetrics.map(row => ({ ...row,
     discovery_count: searches.filter(event => event.turn_id === row.turn_id).length,
     skill_activation_count: activations.filter(event => event.turn_id === row.turn_id).length,

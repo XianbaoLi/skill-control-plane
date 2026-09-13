@@ -13,7 +13,8 @@ RUNTIME_ONLY_PAIRED_METRICS = ("reroute_success", "new_required_skill_recall",
 DIAGNOSTIC_METRICS = ("redundant_discovery_count",
                       "duplicate_skill_activation_count",
                       "bundle_create_count", "bundle_extend_count",
-                      "bundle_reuse_count")
+                      "bundle_reuse_count", "rediscovery_avoided",
+                      "reactivation_avoided", "behavioral_effective_reuse")
 
 
 def _avg(rows: list[dict[str, Any]], metric: str) -> float | None:

@@ -143,7 +143,10 @@ def run_one(*, task: dict[str, Any], arm: str, corpus: str, model: str,
                                    timeout=timeout_seconds)
     wall_time_ms = int((perf_counter() - started) * 1000)
     if not trace_path.exists():
-        raise RuntimeError(f"Pi bridge did not write trace (exit {completed.returncode}): {completed.stderr[-1000:]}")
+        raise RuntimeError(
+            f"Pi bridge did not write trace (exit {completed.returncode}): "
+            f"{(completed.stderr or completed.stdout)[-4000:]}"
+        )
     trace = json.loads(trace_path.read_text(encoding="utf-8"))
     assert_gold_isolated(task, fixture_spec, trace)
     trace["arm"] = arm
@@ -166,6 +169,9 @@ def run_one(*, task: dict[str, Any], arm: str, corpus: str, model: str,
            "query_embedding_calls_total": int(trace.get("query_embedding_calls_startup", 0)) +
                                             int(trace.get("query_embedding_calls_runtime", 0)),
            "wall_time_ms": wall_time_ms, "total_tool_calls": int(trace.get("total_tool_calls", 0)),
+           "rediscovery_avoided": trace.get("rediscovery_avoided"),
+           "reactivation_avoided": trace.get("reactivation_avoided"),
+           "behavioral_effective_reuse": trace.get("behavioral_effective_reuse"),
            "control_plane_telemetry": trace.get("control_plane_telemetry", {
                "retrieval_calls": None,
                "retrieval_events": [] if arm == "control-plane" else None})}

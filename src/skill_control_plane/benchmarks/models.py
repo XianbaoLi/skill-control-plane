@@ -102,6 +102,7 @@ def validate_result(row: dict[str, Any]) -> BenchmarkResult:
         "new_required_skill_recall", "premature_activation_count",
         "bundle_create_count", "bundle_extend_count", "bundle_reuse_count",
         "session_restore_success", "llm_input_tokens", "llm_output_tokens",
+        "rediscovery_avoided", "reactivation_avoided", "behavioral_effective_reuse",
         "llm_total_tokens", "cached_tokens", "query_embedding_calls_startup",
         "query_embedding_calls_runtime", "query_embedding_calls_total", "wall_time_ms",
         "total_tool_calls", "control_plane_telemetry",
@@ -140,10 +141,15 @@ def validate_result(row: dict[str, Any]) -> BenchmarkResult:
         _require(cp.get("retrieval_calls") is None, "native retrieval_calls must be null")
         for key in ("bundle_create_count", "bundle_extend_count", "bundle_reuse_count"):
             _require(row[key] is None, f"native {key} must be null")
+        for key in ("rediscovery_avoided", "reactivation_avoided", "behavioral_effective_reuse"):
+            _require(row[key] is None, f"native {key} must be null")
     else:
         for key in ("bundle_create_count", "bundle_extend_count", "bundle_reuse_count"):
             _require(isinstance(row[key], int) and row[key] >= 0,
                      f"control-plane {key} must be non-negative")
+        for key in ("rediscovery_avoided", "reactivation_avoided", "behavioral_effective_reuse"):
+            _require(row[key] is None or isinstance(row[key], bool),
+                     f"control-plane {key} must be bool or null")
     for key in ("pi_package", "pi_version", "provider", "model", "base_url_host",
                 "corpus_version", "corpus_subset", "retrieval_card_identity",
                 "dense_index_identity", "adapter_commit_sha"):
