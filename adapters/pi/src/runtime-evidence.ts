@@ -31,7 +31,8 @@ export type RuntimeEvidence = {
 
 const FAILURE_PATTERNS: Array<[RuntimeEvidenceKind, RegExp]> = [
   ["verifier_failure", /\b(?:verifier|verification)\s+(?:failed|failure|error)\b/i],
-  ["test_failure", /\b(?:test(?:s| suite)?\s+(?:failed|failure|error)|assertion(?:\s+failed)?)\b/i],
+  ["test_failure", /\b(?:test(?:s| suite)?\s+(?:failed|failure|error)|assertion(?:\s+failed)?|AssertionError)\b/i],
+  ["tool_error", /\bTraceback \(most recent call last\):/],
 ];
 
 export function runtimeEvidenceFromToolResult(

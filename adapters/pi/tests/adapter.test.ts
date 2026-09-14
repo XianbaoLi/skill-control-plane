@@ -280,6 +280,25 @@ test("successful source reads mentioning Error are not failure evidence", async 
   assert.equal((await adapter.projectContext(messages)).length, 1);
 });
 
+test("masked bash traceback is production failure evidence even when Pi reports success", async () => {
+  const sidecar = new RecordingSidecar();
+  const { adapter } = createAdapter(sidecar);
+  await adapter.handleSessionStart(new FakeContext());
+  await adapter.handleTurnStart();
+  sidecar.responses.set("context_snapshot", checkpointSnapshot());
+  sidecar.responses.set("observe_runtime_evidence", {
+    status: "no_gap", evidence_id: "masked-failure",
+  });
+  const messages = [{
+    role: "toolResult", toolCallId: "masked-failure", toolName: "bash", isError: false,
+    content: [{ type: "text", text: "Traceback (most recent call last):\nAssertionError" }],
+  }];
+  assert.equal((await adapter.projectContext(messages)).length, 1);
+  const observed = sidecar.calls.find(call => call.method === "observe_runtime_evidence")!;
+  assert.equal((observed.params.evidence as any).kind, "test_failure");
+  assert.equal((observed.params.evidence as any).source, "bash");
+});
+
 test("duplicate outcome from the controller schedules no duplicate projection", async () => {
   const sidecar = new RecordingSidecar();
   const { adapter } = createAdapter(sidecar);
