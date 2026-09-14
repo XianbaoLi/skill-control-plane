@@ -348,8 +348,8 @@ class RerouteController:
                 "status": "failed",
                 "stage": "selection",
                 "selected_skill_ids": tuple(skill_ids),
-                "error_type": record.error_type,
-                "error_message": record.error_message,
+                "error_type": type(exc).__name__,
+                "error_message": str(exc)[:500],
             })
             raise
 
@@ -374,8 +374,8 @@ class RerouteController:
                 "status": "failed",
                 "stage": "apply",
                 "selected_skill_ids": record.selected_skill_ids,
-                "error_type": record.error_type,
-                "error_message": record.error_message,
+                "error_type": type(exc).__name__,
+                "error_message": str(exc)[:500],
             })
             raise
 
@@ -434,6 +434,8 @@ class RerouteController:
         })
 
     def _fail(self, record: RerouteRecord, stage: str, error: Exception) -> None:
+        if record.state is RerouteState.FAILED:
+            return
         record.error_type = type(error).__name__
         record.error_message = str(error)[:500]
         record.failure_stage = stage

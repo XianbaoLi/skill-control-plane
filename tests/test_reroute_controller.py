@@ -354,6 +354,17 @@ def test_failed_records_cover_gap_decision_selection_and_apply_stages():
     assert apply_record.state_history[-2:] == (
         RerouteState.SELECTED, RerouteState.FAILED,
     )
+    first_reason = apply_record.failure_reason
+    try:
+        apply_runtime.apply_capability(CapabilityDecision(
+            action="CREATE", skill_ids=("slides",), reason="retry",
+            purpose="Retry",
+        ), reroute_evidence_id="apply")
+    except ValueError:
+        pass
+    apply_record = apply_runtime.reroute_snapshot().evidence[0]
+    assert apply_record.failure_stage == "apply"
+    assert apply_record.failure_reason == first_reason
 
 
 def test_turn_lifecycle_retains_tool_loop_state_and_end_turn_clears_it():
