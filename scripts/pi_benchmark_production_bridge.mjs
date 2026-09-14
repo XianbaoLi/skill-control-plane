@@ -78,12 +78,14 @@ if (!existsSync(cards) || !existsSync(dense)) {
   await writeFile(dense, JSON.stringify(index) + '\n');
 }
 const embeddingTelemetry = path.join(workspace, '.embedding-telemetry.jsonl');
+const rerouteTelemetry = path.join(workspace, '.reroute-telemetry.jsonl');
 if (arm === 'control-plane') {
   process.env.SKILL_CONTROL_PLANE_PYTHON = path.join(repo, 'scripts/benchmark_production_sidecar.py');
   process.env.SKILL_CONTROL_PLANE_SKILL_ROOT = skillRoot;
   process.env.SKILL_CONTROL_PLANE_RETRIEVAL_CARDS = cards;
   process.env.SKILL_CONTROL_PLANE_DENSE_INDEX = dense;
   process.env.BENCHMARK_EMBEDDING_TELEMETRY = embeddingTelemetry;
+  process.env.BENCHMARK_REROUTE_TELEMETRY = rerouteTelemetry;
   process.env.PYTHONPATH = path.join(repo, 'src');
 }
 
@@ -301,6 +303,40 @@ const usage = messages.reduce((sum, row) => ({
 let embeddingRows = [];
 if (existsSync(embeddingTelemetry)) embeddingRows = (await readFile(embeddingTelemetry, 'utf8'))
   .split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
+let rerouteSnapshots = [];
+if (arm === 'control-plane' && existsSync(rerouteTelemetry)) {
+  rerouteSnapshots = (await readFile(rerouteTelemetry, 'utf8'))
+    .split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
+}
+const rerouteEvidence = rerouteSnapshots.flatMap(({ turn_index, snapshot }) =>
+  (snapshot?.evidence ?? []).map(record => {
+    const controllerEvents = (snapshot?.telemetry ?? [])
+      .filter(event => event.evidence_id === record.evidence?.evidence_id);
+    const gap = controllerEvents.find(event => event.event === 'reroute_gap_decision');
+    const discovery = controllerEvents.find(event =>
+      event.event === 'reroute_discovery' && event.data?.status === 'discovered');
+    const selection = controllerEvents.find(event =>
+      event.event === 'reroute_candidate_selected' && event.data?.status !== 'failed');
+    const apply = controllerEvents.find(event => event.event === 'reroute_apply_result');
+    const candidateIds = discovery?.data?.candidates ?? [];
+    const candidateRanks = discovery?.data?.ranks ?? [];
+    return {
+      turn_index,
+      evidence: record.evidence,
+      gap_decision: gap?.data ?? null,
+      discovery: discovery?.data ?? null,
+      candidate_ranks: Object.fromEntries(candidateIds.map(
+        (skillId, index) => [skillId, candidateRanks[index] ?? null])),
+      selected_skill_ids: selection?.data?.selected_skill_ids ?? [],
+      committed_skill_ids: apply?.data?.status === 'committed'
+        ? apply.data.selected_skill_ids ?? [] : [],
+      reroute_outcome: record.state,
+      state_history: record.state_history ?? [],
+      failure_stage: record.failure_stage ?? null,
+      failure_reason: record.failure_reason ?? null,
+      controller_events: controllerEvents,
+    };
+  }));
 const sha256 = async file => createHash('sha256').update(await readFile(file)).digest('hex');
 const gitSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
 const piVersion = JSON.parse(await readFile(path.join(piRoot, 'package.json'), 'utf8')).version;
@@ -346,7 +382,9 @@ const trace = {
   control_plane_telemetry: arm === 'control-plane'
     ? { retrieval_calls: searches.length, retrieval_events: searchResults.map(event => ({
         event_seq: event.event_seq, query: event.query, skill_ids: event.skill_ids,
-        active_skill_ids: event.active_skill_ids })) }
+        active_skill_ids: event.active_skill_ids })),
+        reroute_evidence: rerouteEvidence,
+        reroute_snapshots: rerouteSnapshots }
     : { retrieval_calls: null, retrieval_events: null },
   smoke_trace: {
     discoveries: searches.map(event => event.args?.need),

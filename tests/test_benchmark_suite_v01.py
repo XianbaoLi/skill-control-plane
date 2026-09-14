@@ -100,6 +100,32 @@ def test_reroute_scoring_obeys_event_order(tmp_path):
     assert scored["reroute_success"] is False and scored["premature_activation_count"] == 1
 
 
+def test_production_reroute_scoring_uses_controller_telemetry(tmp_path):
+    task = next(t.raw for t in load_tasks(BENCH / "runtime.jsonl") if t.task_id == "RT-T01")
+    task = dict(task, automatic_success_criteria=[])
+    trace = {
+        "arm": "control-plane",
+        "activated_skills": ["fastify", "monitoring"],
+        "events": [],
+        "control_plane_telemetry": {"reroute_evidence": [{
+            "evidence": {"evidence_id": "tool-2", "kind": "test_failure"},
+            "gap_decision": {"needs_capability": True, "active_skill_ids": ["fastify"]},
+            "committed_skill_ids": ["monitoring"],
+            "reroute_outcome": "COMMITTED",
+        }]},
+    }
+    scored = score_run(task, trace, tmp_path)
+    assert scored["reroute_success"] is True
+    assert scored["new_required_skill_recall"] == 1
+    assert scored["premature_activation_count"] == 0
+
+    trace["control_plane_telemetry"]["reroute_evidence"][0]["gap_decision"][
+        "active_skill_ids"] = ["fastify", "monitoring"]
+    scored = score_run(task, trace, tmp_path)
+    assert scored["reroute_success"] is False
+    assert scored["premature_activation_count"] == 1
+
+
 def test_gated_evidence_is_hidden_until_initial_fix(tmp_path):
     fixtures = json.loads((BENCH / "fixtures.json").read_text())
     task = next(t.raw for t in load_tasks(BENCH / "runtime.jsonl") if t.task_id == "RT-T01")

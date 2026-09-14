@@ -38,6 +38,8 @@ def main(argv=None):
     parser.add_argument("--max-searches-per-turn", type=int, default=3)
     args = parser.parse_args(raw)
     telemetry_path = Path(os.environ["BENCHMARK_EMBEDDING_TELEMETRY"])
+    reroute_telemetry_path = Path(os.environ["BENCHMARK_REROUTE_TELEMETRY"])
+    reroute_telemetry_path.parent.mkdir(parents=True, exist_ok=True)
     embedding = TelemetryEmbedding(telemetry_path)
     server = build_sidecar_server(
         skill_root=args.skill_root,
@@ -46,9 +48,23 @@ def main(argv=None):
         max_searches_per_turn=args.max_searches_per_turn,
         embedding_client_factory=lambda: embedding,
     )
+    turn_index = 0
     for raw_line in sys.stdin.buffer:
         line = raw_line.decode("utf-8")
         request = json.loads(line)
+        if request.get("method") == "end_turn":
+            snapshot_response = server.handle_line(json.dumps({
+                "id": f"benchmark-reroute-snapshot-{turn_index}",
+                "method": "reroute_snapshot",
+                "params": {},
+            }))
+            if snapshot_response.get("ok"):
+                with reroute_telemetry_path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps({
+                        "turn_index": turn_index,
+                        "snapshot": snapshot_response["result"],
+                    }, ensure_ascii=False) + "\n")
+                turn_index += 1
         response = server.handle_line(line)
         sys.stdout.buffer.write((json.dumps(response, ensure_ascii=False,
                                             separators=(",", ":")) + "\n").encode())

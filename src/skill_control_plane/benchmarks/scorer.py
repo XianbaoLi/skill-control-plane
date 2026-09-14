@@ -145,33 +145,66 @@ def score_run(task: dict[str, Any], trace: dict[str, Any], workspace: str | Path
     new_recall = None
     premature = 0
     if task.get("scenario_type") == "dynamic-reroute":
-        ordered = sorted(trace.get("events", []), key=lambda event: event.get("event_seq", 0))
-        activation_seq = {}
-        evidence_seq = {}
-        for event in ordered:
-            if event.get("type") == "capability_activation":
-                for skill in event.get("skill_ids", []):
-                    activation_seq.setdefault(skill, event["event_seq"])
-            if event.get("type") == "evidence_emitted":
-                evidence_seq.setdefault(event.get("event_id"), event["event_seq"])
-        expected = []
-        successes = []
-        for event in task["reroute_events"]:
-            trigger = evidence_seq.get(event["event_id"])
-            skills = event["new_required_skills"]
-            expected.extend(skills)
-            after = [skill for skill in skills if trigger is not None and
-                     activation_seq.get(skill, -1) > trigger]
-            premature += sum(activation_seq.get(skill, 10**18) < (trigger or -1)
-                             for skill in skills)
-            successes.append(trigger is not None and len(after) == len(skills))
-        discovered_after = sum(any(
-            evidence_seq.get(event["event_id"]) is not None and
-            activation_seq.get(skill, -1) > evidence_seq[event["event_id"]]
-            for event in task["reroute_events"] if skill in event["new_required_skills"])
-            for skill in set(expected))
-        new_recall = discovered_after / len(set(expected)) if expected else 1.0
-        reroute_ok = all(successes) and premature == 0
+        controller_reroutes = trace.get("control_plane_telemetry", {}).get(
+            "reroute_evidence", [])
+        if controller_reroutes:
+            # Production control-plane scoring consumes controller-owned facts.
+            # It never identifies evidence by scanning provider/tool-result text.
+            expected = {
+                skill
+                for event in task["reroute_events"]
+                for skill in event["new_required_skills"]
+            }
+            committed = {
+                skill
+                for reroute in controller_reroutes
+                for skill in reroute.get("committed_skill_ids", [])
+            }
+            active_when_observed = {
+                skill
+                for reroute in controller_reroutes
+                for skill in (reroute.get("gap_decision") or {}).get(
+                    "active_skill_ids", [])
+            }
+            successful_terminals = any(
+                reroute.get("reroute_outcome") == "COMMITTED"
+                for reroute in controller_reroutes
+            )
+            premature = len(expected & active_when_observed)
+            new_recall = len(expected & committed) / len(expected) if expected else 1.0
+            reroute_ok = (
+                expected <= committed and successful_terminals and premature == 0
+            )
+        else:
+            # Retained for native/faux historical traces, which do not have a
+            # RerouteController. Production control-plane traces take the branch above.
+            ordered = sorted(trace.get("events", []), key=lambda event: event.get("event_seq", 0))
+            activation_seq = {}
+            evidence_seq = {}
+            for event in ordered:
+                if event.get("type") == "capability_activation":
+                    for skill in event.get("skill_ids", []):
+                        activation_seq.setdefault(skill, event["event_seq"])
+                if event.get("type") == "evidence_emitted":
+                    evidence_seq.setdefault(event.get("event_id"), event["event_seq"])
+            expected = []
+            successes = []
+            for event in task["reroute_events"]:
+                trigger = evidence_seq.get(event["event_id"])
+                skills = event["new_required_skills"]
+                expected.extend(skills)
+                after = [skill for skill in skills if trigger is not None and
+                         activation_seq.get(skill, -1) > trigger]
+                premature += sum(activation_seq.get(skill, 10**18) < (trigger or -1)
+                                 for skill in skills)
+                successes.append(trigger is not None and len(after) == len(skills))
+            discovered_after = sum(any(
+                evidence_seq.get(event["event_id"]) is not None and
+                activation_seq.get(skill, -1) > evidence_seq[event["event_id"]]
+                for event in task["reroute_events"] if skill in event["new_required_skills"])
+                for skill in set(expected))
+            new_recall = discovered_after / len(set(expected)) if expected else 1.0
+            reroute_ok = all(successes) and premature == 0
     return {
         "task_success": all(ok for ok, _ in details),
         "success_details": [{"success": ok, "detail": detail} for ok, detail in details],
