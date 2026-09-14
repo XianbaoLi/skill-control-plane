@@ -22,6 +22,27 @@ runtime/SkillControlPlane ──→ discovery ──→ registry
 evals ──→ production modules       (sidecar only)
 ```
 
+The current Pi integration instantiates that architecture without modifying the Pi
+Agent loop:
+
+```text
+Pi Agent Loop
+    ↓
+adapters/pi (TypeScript)
+    ↓ private stdio NDJSON
+skill_control_plane.sidecar
+    ↓
+SkillControlPlane
+    ├── RerouteController
+    ├── DiscoverySession
+    ├── CapabilityMemory
+    └── Discovery ──→ Registry
+```
+
+The Pi adapter owns host-specific event/tool mapping. The Python sidecar is the
+process boundary; runtime decisions and state remain in the Core. Additional host
+adapters, including a dedicated Hermes adapter, are outside v0.1.
+
 Allowed dependencies are:
 
 - `integrations -> runtime -> discovery -> registry`;
@@ -37,7 +58,8 @@ The following are forbidden and enforced by tests:
   `evals`, experiments or demos.
 
 The CLI exposes corpus and evaluation utilities. It is not an additional runtime
-layer. OpenPI/Hermes migration and a unified Agent API are outside V1.
+layer. The Pi adapter is the current production host integration; a unified
+multi-Agent adapter API is outside V1.
 
 ## Public boundary
 
@@ -70,12 +92,12 @@ Dense backend exists, and the fusion path is RRF. Any mismatch is a configuratio
 error and startup fails closed. `SkillControlPlane.from_tree()` requires both the
 Retrieval Card corpus and a Dense factory; it does not synthesize either one.
 
-`readiness()` is the explicit startup contract for future adapter and sidecar
-hosts. It reports Skill Store, Retrieval Cards, Dense configuration, fusion
-backend, and a separate Dense/RRF probe. Overall readiness is true only when
-Cards are complete and current, Dense is configured, fusion is RRF, and the probe
-executes successfully. The probe calls Discovery directly, never Discovery
-Session, so it cannot pollute pending Candidates, search counters, or audit.
+`readiness()` is the explicit startup contract for adapter and sidecar hosts. It
+reports Skill Store, Retrieval Cards, Dense configuration, fusion backend, and a
+separate Dense/RRF probe. Overall readiness is true only when Cards are complete
+and current, Dense is configured, fusion is RRF, and the probe executes
+successfully. The probe calls Discovery directly, never Discovery Session, so it
+cannot pollute pending Candidates, search counters, or audit.
 
 ## Canonical entities
 
@@ -251,11 +273,22 @@ only on `SkillControlPlane` public methods. `ReferenceSkillAgent` is a
 reference/example integration; its historical `ExperimentalSkillAgent` alias is
 retained for experiment reproducibility and is not a Core state owner.
 
+`adapters/pi/` is the current Pi host adapter. It maps Pi lifecycle/tool events to
+sidecar RPCs, converts eligible host/tool failures into `RuntimeEvidence`, projects
+compact Bundle/candidate state into Pi context, forwards `reroute_evidence_id`
+through apply, and persists/restores the versioned CapabilityMemory snapshot. It
+does not own discovery, gap-decision, Bundle, or reroute state.
+
+`skill_control_plane.sidecar` exposes the Core over private stdio NDJSON. The
+sidecar performs readiness checks, request/response correlation, and Core method
+dispatch; the Pi adapter remains responsible for Pi-specific schemas and message
+projection.
+
 `RuntimeCapabilityHarness` is a deprecated historical compatibility adapter. It
 remains importable from its module for V0.x experiments, including old combined
 resolver-loader tests, but is absent from top-level exports and README examples.
-It is not used by `ReferenceSkillAgent`, and its combined `load_capability()` path
-does not exist on `SkillControlPlane`.
+It is not used by `ReferenceSkillAgent` or the Pi adapter, and its combined
+`load_capability()` path does not exist on `SkillControlPlane`.
 
 ## Runtime sequence
 
@@ -292,8 +325,9 @@ Core validation and Capability Memory preserve the existing commit lifecycle.
 Classification used for the V1 cleanup:
 
 - **KEEP**: `registry/{loader,store}.py`, `discovery/**`,
-  `runtime/{control_plane,discovery_session,capability_memory}.py`,
-  `integrations/**`, current corpus helpers, CLI, tests and fixtures.
+  `runtime/{control_plane,discovery_session,capability_memory,reroute}.py`,
+  `sidecar/**`, `adapters/pi/**`, `integrations/**`, current corpus helpers, CLI,
+  tests and fixtures.
 - **MERGE**: registry-owned Retrieval Card/index preparation moved into Discovery;
   Harness pending/search/sufficiency moved into Discovery Session; Harness Bundle
   and body state moved into Capability Memory; experimental agent tool/history
@@ -311,10 +345,16 @@ modules to validate behavior.
 
 ## Verification
 
+Use an environment where the project is installed (for example,
+`python -m pip install -e ".[dev]"`):
+
 ```bash
-PYTHONPATH=src .venv/bin/pytest -q
-PYTHONPATH=src .venv/bin/pytest -q -W error::DeprecationWarning
-.venv/bin/python -m compileall -q src tests scripts
+python -m pytest -q
+python -m pytest -q -W error::DeprecationWarning
+python -m compileall -q src tests scripts
+npm --prefix adapters/pi ci
+npm --prefix adapters/pi test
+npm --prefix adapters/pi run typecheck
 git diff --check
 ```
 
