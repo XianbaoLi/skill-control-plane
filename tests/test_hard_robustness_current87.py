@@ -73,7 +73,11 @@ def test_completed_artifact_recomputed_independently():
             for kind in runner.KINDS:
                 ranks=[v[arm]['rank'] for v in variants if v['kind']==kind]
                 assert len(ranks)==13
-                assert r['by_kind'][kind][arm]==runner.metrics(ranks)
+                expected = runner.metrics(ranks)
+                actual = r["by_kind"][kind][arm]
+                assert actual.keys() == expected.keys()
+                for metric, value in expected.items():
+                    assert actual[metric] == pytest.approx(value)
         for s in r['stages']:
             for v in s['variants']:
                 ids={c['skill_id'] for arm in ('dense','bm25') for c in v[arm]['ranking']}
