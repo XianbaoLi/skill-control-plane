@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  python-test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -21,4 +21,23 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[dev]"
       - name: Test
-        run: pytest -q
+        run: python -m pytest -q
+      - name: Compile check
+        run: python -m compileall -q src scripts
+
+  pi-adapter:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: adapters/pi/package-lock.json
+      - name: Install adapter dependencies
+        run: npm --prefix adapters/pi ci
+      - name: Adapter tests
+        run: npm --prefix adapters/pi test
+      - name: Adapter typecheck
+        run: npm --prefix adapters/pi run typecheck

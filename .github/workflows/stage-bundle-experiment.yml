@@ -1,8 +1,8 @@
-name: stage-bundle-experiment
+name: legacy-stage-bundle-experiment
 
+# Historical exploratory workflow retained for reproducibility only.
+# It is intentionally manual and is not part of the v0.1 production CI path.
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
