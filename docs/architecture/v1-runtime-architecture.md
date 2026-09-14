@@ -237,7 +237,9 @@ represented only as Bundle members with role `direct`.
 `runtime/control_plane.py` is the sole supported Integration-to-Core boundary. It
 delegates exact storage to Registry, one search to Discovery, turn state and
 eligibility to Discovery Session, and cross-turn Bundle/body state to Capability
-Memory. It does not expose those components or duplicate their mutable state.
+Memory. Runtime evidence eligibility, gap decisions, deduplication, automatic
+discovery, and per-evidence state are owned by `RerouteController`. It does not
+expose those components or duplicate their mutable state.
 
 ### Integrations
 
@@ -262,21 +264,28 @@ new user turn
   1. Integration calls SkillControlPlane.begin_turn().
   2. Integration serializes context_snapshot() into its own prompt and injects
      projected canonical history.
-  3. Model follows Bundle-first Trigger.
-  4. If a gap exists, load_capability delegates through SkillControlPlane to one
-     Discovery search.
-  5. Discovery Session accumulates Candidates and derives SEARCH_MORE.
-  6. Model either searches a distinct residual gap, reports UNSATISFIED, or calls
-     apply_capability with coverage and remaining gaps.
-  7. Discovery Session validates Candidate eligibility and action fields.
-  8. Capability Memory atomically CREATEs a Bundle or adds maintained/direct members.
+  3. The adapter converts a new runtime failure/subgoal/host signal into one
+     structured RuntimeEvidence object.
+  4. RerouteController applies deterministic eligibility and fingerprint dedup,
+     then calls CapabilityGapDecider with evidence, compact Bundle Cards, and only
+     necessary subgoal context.
+  5. A positive decision automatically delegates through SkillControlPlane to the
+     existing Discovery search; a negative decision terminates as NO_GAP.
+  6. The Main Agent receives discovered Candidates and either reports
+     UNSATISFIED, or calls
+     apply_capability with coverage, remaining gaps, and the reroute evidence ID.
+  7. The runtime uses that ID to validate the selection and mark the controller
+     `SELECTED`; Discovery Session then validates action fields.
+  8. Capability Memory atomically CREATEs a Bundle or adds maintained/direct members,
+     after which the runtime marks the controller `COMMITTED`.
   9. Later compression may evict bodies while Bundle Cards survive.
  10. A needed known body is reloaded exactly; History Projection exposes only the
      latest resident occurrence.
 ```
 
-There is no independent Resolver LLM in the V1 path. Capability sufficiency and
-organization are expressed through the same model's native calls and Core validation.
+CapabilityGapDecider is a narrow structured decision boundary, not a second
+retriever or Skill selector. Capability organization remains with the Main Agent;
+Core validation and Capability Memory preserve the existing commit lifecycle.
 
 ## Eval isolation and cleanup inventory
 

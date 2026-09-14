@@ -34,6 +34,21 @@ from .discovery_session import (
     SearchControl,
     TurnAudit,
 )
+from .reroute import (
+    CapabilityGapDecider,
+    GapDecision,
+    RerouteController,
+    RerouteOutcome,
+    RerouteSnapshot,
+    RuntimeEvidence,
+)
+
+
+class _NoGapDecider:
+    """Safe default for integrations that never submit runtime evidence."""
+
+    def decide_gap(self, evidence, active_bundle_cards, current_subgoal_context):
+        return GapDecision(False, None, "no CapabilityGapDecider configured")
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +87,7 @@ class ContextSnapshot:
     search_count: int
     remaining_search_budget: int
     capability_sufficiency_outcome: str
+    reroute_pending_count: int
 
     @property
     def skill_body_states(self) -> dict[str, str]:
@@ -131,6 +147,7 @@ class SkillControlPlane:
         state: RuntimeCapabilityState | None = None,
         memory: CapabilityMemory | None = None,
         discovery_session: DiscoverySession | None = None,
+        gap_decider: CapabilityGapDecider | None = None,
         max_searches_per_turn: int = 3,
     ) -> None:
         if discovery is None:
@@ -178,6 +195,12 @@ class SkillControlPlane:
         self._discovery = discovery
         self._memory = memory
         self._session = discovery_session
+        self._reroute = RerouteController(
+            gap_decider=gap_decider or _NoGapDecider(),
+            discover_capability=self.search_capability,
+            active_bundle_cards=lambda: self._memory.snapshot(compact=True).maintained_bundles,
+            active_skill_ids=lambda: self._memory.active_skill_ids,
+        )
 
     @classmethod
     def from_tree(
@@ -186,6 +209,7 @@ class SkillControlPlane:
         *,
         retrieval_cards,
         dense_factory,
+        gap_decider: CapabilityGapDecider | None = None,
         max_searches_per_turn: int = 3,
     ) -> "SkillControlPlane":
         """Build the production runtime from mandatory complete Discovery inputs."""
@@ -205,16 +229,19 @@ class SkillControlPlane:
         return cls(
             store,
             discovery=discovery,
+            gap_decider=gap_decider,
             max_searches_per_turn=max_searches_per_turn,
         )
 
     def begin_turn(self) -> None:
         self._session.begin_turn()
+        self._reroute.begin_turn()
 
     def end_turn(self) -> None:
         """Discard uncommitted Candidate Closure state at a completed turn."""
 
         self._session.pending_candidates = None
+        self._reroute.end_turn()
 
     def context_snapshot(self, *, compact: bool = True) -> ContextSnapshot:
         memory = self._memory.snapshot(compact=compact)
@@ -230,7 +257,21 @@ class SkillControlPlane:
             remaining_search_budget=(
                 self._session.max_searches - self._session.search_count),
             capability_sufficiency_outcome=self._session.sufficiency,
+            reroute_pending_count=len(self._reroute.pending()),
         )
+
+    def observe_runtime_evidence(
+        self,
+        evidence: RuntimeEvidence,
+        *,
+        current_subgoal_context: str | None = None,
+    ) -> RerouteOutcome:
+        return self._reroute.observe(
+            evidence, current_subgoal_context=current_subgoal_context,
+        )
+
+    def reroute_snapshot(self) -> RerouteSnapshot:
+        return self._reroute.snapshot()
 
     def search_capability(self, need: str, *, k: int = 10) -> CapabilitySearchResult:
         result = self._session.search(need, k=k)
@@ -251,12 +292,29 @@ class SkillControlPlane:
         )
 
     def apply_capability(
-        self, decision: CapabilityDecision,
+        self,
+        decision: CapabilityDecision,
+        *,
+        reroute_evidence_id: str | None = None,
     ) -> CapabilityApplication:
-        return self._session.apply(decision)
+        if reroute_evidence_id is None:
+            return self._session.apply(decision)
+
+        self._reroute.mark_selected(reroute_evidence_id, decision.skill_ids)
+        try:
+            result = self._session.apply(decision)
+        except Exception as exc:
+            self._reroute.mark_apply_failed(reroute_evidence_id, exc)
+            raise
+        self._reroute.mark_committed(
+            reroute_evidence_id, result.selected_skill_ids,
+        )
+        return result
 
     def load_skill_body(self, skill_id: str) -> SkillBodyLoadResult:
-        return self._memory.load_skill_body(skill_id)
+        result = self._memory.load_skill_body(skill_id)
+        self._reroute.record_body_load(skill_id, result.status)
+        return result
 
     def mark_skill_body_evicted(self, skill_id: str) -> None:
         self._memory.mark_skill_body_evicted(skill_id)

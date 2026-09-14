@@ -12,6 +12,7 @@ import pytest
 from skill_control_plane import (
     CapabilityDecision,
     CoverageClaim,
+    GapDecision,
     SkillControlPlane,
     StateSnapshotBundleV1,
     StateSnapshotMemberV1,
@@ -172,6 +173,71 @@ def test_search_capability_serializes_core_dto(server):
     assert result["candidates"][0]["skill_id"] == "slides"
     assert result["retrieval_trace"]["backend"] == "rrf"
     assert result["search_control"]["remaining_search_budget"] == 2
+
+
+def test_runtime_evidence_protocol_runs_gap_decider_and_automatic_discovery():
+    class Decider:
+        def decide_gap(self, evidence, active_bundle_cards, current_subgoal_context):
+            assert evidence.kind == "verifier_failure"
+            assert current_subgoal_context == "finish presentation"
+            return GapDecision(True, "create slides", "presentation support missing")
+
+    store = _store()
+    reroute_server = SidecarServer(SkillControlPlane(
+        store, discovery=full_discovery(store), gap_decider=Decider(),
+    ), diagnostics=StringIO())
+    _call(reroute_server, "begin_turn")
+    response = _call(reroute_server, "observe_runtime_evidence", {
+        "evidence": {
+            "evidence_id": "ev-1",
+            "kind": "verifier_failure",
+            "source": "host-verifier",
+            "text": "presentation output is missing",
+            "fingerprint": "fp-1",
+            "metadata": {"check": "output"},
+        },
+        "current_subgoal_context": "finish presentation",
+    })
+
+    assert response["ok"] is True
+    assert response["result"]["status"] == "discovered"
+    assert response["result"]["candidates"][0]["skill_id"] == "slides"
+    applied = _call(reroute_server, "apply_capability", {
+        "action": "CREATE",
+        "skill_ids": ["slides"],
+        "reason": "reusable presentation work",
+        "purpose": "Presentation work",
+        "coverage": [{"need": "create slides", "covered_by": "skill:slides"}],
+        "reroute_evidence_id": "ev-1",
+    })
+    assert applied["ok"] is True
+    snapshot = _call(reroute_server, "reroute_snapshot")["result"]
+    assert snapshot["evidence"][0]["state"] == "COMMITTED"
+    assert snapshot["evidence"][0]["state_history"] == [
+        "NEW", "CHECKING", "GAP_FOUND", "DISCOVERED", "SELECTED", "COMMITTED",
+    ]
+    assert [event["event"] for event in snapshot["telemetry"]][:5] == [
+        "reroute_evidence_observed",
+        "reroute_evidence_eligibility",
+        "reroute_state_transition",
+        "reroute_state_transition",
+        "reroute_gap_decision",
+    ]
+    context = _call(reroute_server, "context_snapshot")["result"]
+    assert context["maintained_bundles"][0]["members"][0]["skill_id"] == "slides"
+
+
+def test_runtime_evidence_protocol_rejects_benchmark_specific_or_unknown_kind(server):
+    response = _call(server, "observe_runtime_evidence", {
+        "evidence": {
+            "evidence_id": "benchmark",
+            "kind": "benchmark_evidence",
+            "source": "benchmark",
+            "text": "marker",
+            "fingerprint": "fp",
+        },
+    })
+    assert response["error"]["code"] == "INVALID_PARAMS"
 
 
 @pytest.mark.parametrize("action,skill_ids", [

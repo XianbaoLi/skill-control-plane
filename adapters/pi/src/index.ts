@@ -1,29 +1,17 @@
 import { adapterConfigFromEnvironment, type AdapterConfig } from "./config.ts";
-import { EVICTED_MARKER_PREFIX, formatRuntimePolicy, projectSkillBodies } from "./projection.ts";
-import { SidecarClient, SidecarError, type SpawnFunction } from "./sidecar-client.ts";
+import { formatRuntimePolicy, projectSkillBodies } from "./projection.ts";
+import { SidecarClient, SidecarError } from "./sidecar-client.ts";
 import { STATE_ENTRY_TYPE, isStateSnapshot } from "./state.ts";
-import type { AgentMessage, ExtensionContext, Handshake, PiAPI, SidecarClientLike, TextContent, ToolResultMessage } from "./types.ts";
+import { runtimeEvidenceFromToolResult } from "./runtime-evidence.ts";
+import type { AgentMessage, ExtensionContext, Handshake, PiAPI, SidecarClientLike, ToolResultMessage } from "./types.ts";
 
 type TypeBoxLike = {
   Object(fields: Record<string, unknown>, options?: Record<string, unknown>): unknown;
   Optional(schema: unknown): unknown;
   String(options?: Record<string, unknown>): unknown;
   Integer(options?: Record<string, unknown>): unknown;
-  Boolean(): unknown;
   Array(schema: unknown, options?: Record<string, unknown>): unknown;
 };
-
-const CONTROL_PLANE_TOOL_NAMES = new Set([
-  "capability_gap_check",
-  "load_capability",
-  "search_capability",
-  "apply_capability",
-  "load_skill_body",
-]);
-
-function isControlPlaneTool(toolName: string): boolean {
-  return CONTROL_PLANE_TOOL_NAMES.has(toolName);
-}
 
 export type AdapterDependencies = {
   config: AdapterConfig;
@@ -41,15 +29,6 @@ export class PiSidecarAdapter {
   private readonly makeSidecar: (config: AdapterConfig) => StartableSidecar;
   private client: StartableSidecar | null = null;
   private pi: PiAPI | null = null;
-  private readonly checkedEvidence = new Set<string>();
-  private pendingGapEvidence: {
-    fingerprint: string;
-    reason: string;
-    text: string;
-    activeSkillIds: string[];
-  }[] = [];
-  private readonly processedCheckpointFingerprints = new Set<string>();
-  private awaitingCheckpointFingerprint: string | null = null;
 
   constructor({ config, typebox, sidecarFactory }: AdapterDependencies) {
     this.config = config;
@@ -131,10 +110,6 @@ export class PiSidecarAdapter {
   }
 
   async handleTurnStart(): Promise<void> {
-    this.checkedEvidence.clear();
-    this.pendingGapEvidence = [];
-    this.processedCheckpointFingerprints.clear();
-    this.awaitingCheckpointFingerprint = null;
     await this.requireSidecar().request("begin_turn");
   }
 
@@ -165,56 +140,31 @@ export class PiSidecarAdapter {
       { compact: true },
     );
     const projected = projectSkillBodies(messages, snapshot);
-    let observedNewEvidence = false;
+    const discoveries: Array<Record<string, unknown>> = [];
     for (const message of projected) {
       if (message.role !== "toolResult") continue;
       const result = message as ToolResultMessage;
-      if (isControlPlaneTool(result.toolName)) continue;
-      const text = result.content.filter((item): item is TextContent => item.type === "text")
-        .map(item => item.text).join("\n");
-      // A successful read may legitimately contain words such as `Error` in
-      // source code.  Only tool errors or an actual command/verifier failure
-      // are runtime evidence.
-      const eligible = result.isError === true || (
-        result.toolName === "bash" &&
-        /\b(?:test(?:s| suite)?\s+(?:fail(?:ed|ure)|error)|verifier|assertion(?:\s+failed)?|command exited with code [1-9])\b/i.test(text)
+      const evidence = runtimeEvidenceFromToolResult(result);
+      if (evidence === null) continue;
+      const outcome = await this.requireSidecar().request<Record<string, unknown>>(
+        "observe_runtime_evidence", { evidence },
       );
-      if (!eligible) continue;
-      const fingerprint = `${result.toolName}:${text.replace(/\s+/g, " ").trim().slice(0, 512)}`;
-      if (this.checkedEvidence.has(fingerprint)) continue;
-      this.checkedEvidence.add(fingerprint);
-      this.pendingGapEvidence.push({
-        fingerprint,
-        reason: result.isError === true ? "tool_error" : "runtime_failure",
-        text,
-        activeSkillIds: snapshot.maintained_bundles.flatMap(bundle =>
-          bundle.members.map(member => member.skill_id)),
-      });
-      observedNewEvidence = true;
+      if (outcome.status === "discovered") discoveries.push(outcome);
     }
-    if (!observedNewEvidence || this.awaitingCheckpointFingerprint !== null) return projected;
-    const checkpointEvidence = this.pendingGapEvidence.find(item =>
-      !this.processedCheckpointFingerprints.has(item.fingerprint));
-    if (checkpointEvidence === undefined) return projected;
-    this.processedCheckpointFingerprints.add(checkpointEvidence.fingerprint);
-    this.awaitingCheckpointFingerprint = checkpointEvidence.fingerprint;
-    return [...projected, {
+    if (discoveries.length === 0) return projected;
+    return [...projected, ...discoveries.map(outcome => ({
       role: "user",
-      content: [{ type: "text", text: `Capability-gap checkpoint: new runtime evidence follows. Active skills: ${checkpointEvidence.activeSkillIds.join(", ") || "none"}. Bundle Cards:\n${formatRuntimePolicy(snapshot)}\nEvidence:\n- ${checkpointEvidence.text.slice(0, 800)}\nCall capability_gap_check with needs_capability=false if active capabilities suffice; otherwise provide one concise missing capability need. Do not select a Skill in this check.` }],
-    }];
+      content: [{ type: "text", text: `Runtime reroute discovery (selection remains yours):\n${JSON.stringify({
+        evidence_id: outcome.evidence_id,
+        need: outcome.need,
+        candidates: outcome.candidates,
+        current_bundle_cards: snapshot.maintained_bundles,
+      })}\nSelect only needed candidate Skills. Pass reroute_evidence_id to apply_capability when committing this discovery.` }],
+    }))];
   }
 
   async handleTurnEnd(): Promise<void> {
-    try {
-      await this.requireSidecar().request("end_turn");
-    } finally {
-      // Evidence decisions are scoped to one user turn, independently of the
-      // sidecar's Candidate Closure state.
-      this.checkedEvidence.clear();
-      this.pendingGapEvidence = [];
-      this.processedCheckpointFingerprints.clear();
-      this.awaitingCheckpointFingerprint = null;
-    }
+    await this.requireSidecar().request("end_turn");
   }
 
   async handleSessionCompact(ctx: ExtensionContext): Promise<void> {
@@ -255,36 +205,6 @@ export class PiSidecarAdapter {
   private registerTools(pi: PiAPI): void {
     const { Type } = this.typebox;
     pi.registerTool({
-      name: "capability_gap_check",
-      label: "Capability gap check",
-      description: "Decide whether newly observed runtime evidence requires a new capability. This never selects Skills or performs retrieval.",
-      parameters: Type.Object({
-        needs_capability: Type.Boolean(),
-        need: Type.Optional(Type.String({ minLength: 1, maxLength: 240 })),
-      }),
-      execute: async (_toolCallId: string, params: { needs_capability: boolean; need?: string | null }) => {
-        const needs = params.needs_capability;
-        const need = typeof params.need === "string" ? params.need.trim() : "";
-        if (needs && (!need || need.length > 240)) {
-          throw new Error("need must be a concise non-empty string when needs_capability is true");
-        }
-        if (!needs && need) throw new Error("need must be empty or null when needs_capability is false");
-        const evidenceIndex = this.pendingGapEvidence.findIndex(item =>
-          item.fingerprint === this.awaitingCheckpointFingerprint);
-        const evidence = evidenceIndex < 0 ? undefined : this.pendingGapEvidence.splice(evidenceIndex, 1)[0];
-        this.awaitingCheckpointFingerprint = null;
-        return { content: [{ type: "text", text: JSON.stringify({
-          checkpoint: "capability_gap_check", trigger_reason: evidence?.reason ?? "manual",
-          evidence_fingerprint: evidence?.fingerprint ?? null,
-          active_skill_ids: evidence?.activeSkillIds ?? [],
-          needs_capability: needs, generated_need: needs ? need : null,
-          search_started: needs,
-          next_step: needs ? "Call load_capability with generated_need." : "Continue without retrieval.",
-        }) }] };
-      },
-    });
-
-    pi.registerTool({
       name: "load_capability",
       label: "Load capability",
       description: "Search Skill Control Plane for capabilities matching the current need.",
@@ -303,7 +223,7 @@ export class PiSidecarAdapter {
     pi.registerTool({
       name: "apply_capability",
       label: "Apply capability",
-      description: "Commit selected Skills after load_capability. CREATE requires purpose and creates a Bundle; EXTEND and DIRECT require target_bundle_id and must not include purpose.",
+      description: "Commit selected Skills after discovery. CREATE requires purpose and creates a Bundle; EXTEND and DIRECT require target_bundle_id. For runtime reroute candidates, include reroute_evidence_id from the discovery projection.",
       // Some OpenAI-compatible providers emit `{}` for JSON-schema unions.
       // Keep the provider-facing shape a plain object and put the conditional
       // contract in the description; the sidecar remains the strict validator.
@@ -320,6 +240,7 @@ export class PiSidecarAdapter {
           covered_by: Type.String({ minLength: 1 }),
         }))),
         remaining_gaps: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+        reroute_evidence_id: Type.Optional(Type.String({ minLength: 1 })),
       }, { additionalProperties: false }),
       execute: async (_toolCallId: string, params: Record<string, unknown>) => {
         const applied = await this.requireSidecar().request<Record<string, unknown>>(

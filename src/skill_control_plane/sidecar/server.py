@@ -11,11 +11,12 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from skill_control_plane.discovery.bigmodel import BigModelEmbeddingClient
+from skill_control_plane.corpus.bigmodel_chat import BigModelChatClient
 from skill_control_plane.discovery.dense_index import (
     load_precomputed_dense_retriever,
 )
 from skill_control_plane.runtime import (
-    CapabilityDecision,
+    CompletionCapabilityGapDecider,
     ControlPlaneReadiness,
     SkillControlPlane,
 )
@@ -30,6 +31,7 @@ from .protocol import (
     ProtocolError,
     Request,
     decode_capability_decision,
+    decode_runtime_evidence,
     decode_state_snapshot,
     encode_json,
     parse_request,
@@ -40,6 +42,8 @@ SUPPORTED_METHODS = (
     "begin_turn",
     "end_turn",
     "context_snapshot",
+    "observe_runtime_evidence",
+    "reroute_snapshot",
     "search_capability",
     "apply_capability",
     "load_skill_body",
@@ -77,6 +81,8 @@ class SidecarServer:
             "begin_turn": self._begin_turn,
             "end_turn": self._end_turn,
             "context_snapshot": self._context_snapshot,
+            "observe_runtime_evidence": self._observe_runtime_evidence,
+            "reroute_snapshot": self._reroute_snapshot,
             "search_capability": self._search_capability,
             "apply_capability": self._apply_capability,
             "load_skill_body": self._load_skill_body,
@@ -244,10 +250,30 @@ class SidecarServer:
             raise ProtocolError(INVALID_PARAMS, "k must be a positive integer")
         return self._runtime(request).search_capability(need, k=k)
 
+    def _observe_runtime_evidence(self, request: Request) -> object:
+        evidence, context = decode_runtime_evidence(request.params)
+        return self._runtime(request).observe_runtime_evidence(
+            evidence, current_subgoal_context=context,
+        )
+
+    def _reroute_snapshot(self, request: Request) -> object:
+        self._require_empty(request)
+        return self._runtime(request).reroute_snapshot()
+
     def _apply_capability(self, request: Request) -> object:
         control_plane = self._runtime(request)
-        decision = decode_capability_decision(request.params)
-        return control_plane.apply_capability(decision)
+        params = dict(request.params)
+        reroute_evidence_id = params.pop("reroute_evidence_id", None)
+        if reroute_evidence_id is not None and (
+            not isinstance(reroute_evidence_id, str) or not reroute_evidence_id.strip()
+        ):
+            raise ProtocolError(
+                INVALID_PARAMS, "reroute_evidence_id must be non-empty text",
+            )
+        decision = decode_capability_decision(params)
+        return control_plane.apply_capability(
+            decision, reroute_evidence_id=reroute_evidence_id,
+        )
 
     def _load_skill_body(self, request: Request) -> object:
         return self._runtime(request).load_skill_body(
@@ -325,6 +351,9 @@ def build_sidecar_server(
         control_plane = SkillControlPlane.from_tree(
             skill_root,
             retrieval_cards=retrieval_cards,
+            gap_decider=CompletionCapabilityGapDecider(
+                lambda prompt: BigModelChatClient()(prompt)
+            ),
             max_searches_per_turn=max_searches_per_turn,
             dense_factory=lambda records: load_precomputed_dense_retriever(
                 dense_index,

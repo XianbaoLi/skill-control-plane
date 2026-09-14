@@ -1,5 +1,9 @@
 # Generic capability-gap checkpoint architecture (v0.1)
 
+> Deprecated. The prompt-driven checkpoint and model-facing
+> `capability_gap_check` described here were removed in favor of the first-class
+> [Runtime RerouteController](../architecture/reroute-controller-v0.1.md).
+
 ## Audit and insertion point
 
 The Pi adapter owns the user-turn lifecycle: `agent_start` calls

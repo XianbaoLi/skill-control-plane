@@ -11,6 +11,7 @@ from typing import Any
 from skill_control_plane.runtime import (
     CapabilityDecision,
     CoverageClaim,
+    RuntimeEvidence,
     StateSnapshotBundleV1,
     StateSnapshotMemberV1,
     StateSnapshotV1,
@@ -232,6 +233,45 @@ def decode_capability_decision(value: Any) -> CapabilityDecision:
         coverage=tuple(coverage),
         remaining_gaps=remaining_gaps,
     )
+
+
+def decode_runtime_evidence(value: Any) -> tuple[RuntimeEvidence, str | None]:
+    data = _object(value, "observe_runtime_evidence params")
+    if set(data) - {"evidence", "current_subgoal_context"}:
+        raise ProtocolError(
+            INVALID_PARAMS, "observe_runtime_evidence params have unknown fields",
+        )
+    _required_fields(data, {"evidence"}, "observe_runtime_evidence params")
+    raw = _object(data["evidence"], "evidence")
+    allowed = {"evidence_id", "kind", "source", "text", "fingerprint", "metadata"}
+    unknown = set(raw) - allowed
+    if unknown:
+        raise ProtocolError(
+            INVALID_PARAMS, "evidence has unknown fields", {"unknown": sorted(unknown)},
+        )
+    _required_fields(
+        raw, {"evidence_id", "kind", "source", "text", "fingerprint"}, "evidence",
+    )
+    metadata = raw.get("metadata", {})
+    if not isinstance(metadata, dict):
+        raise ProtocolError(INVALID_PARAMS, "evidence metadata must be an object")
+    context = data.get("current_subgoal_context")
+    if context is not None and (not isinstance(context, str) or not context.strip()):
+        raise ProtocolError(
+            INVALID_PARAMS, "current_subgoal_context must be non-empty text or null",
+        )
+    try:
+        evidence = RuntimeEvidence(
+            evidence_id=_string(raw["evidence_id"], "evidence_id"),
+            kind=_string(raw["kind"], "kind"),
+            source=_string(raw["source"], "source"),
+            text=_string(raw["text"], "text"),
+            fingerprint=_string(raw["fingerprint"], "fingerprint"),
+            metadata=metadata,
+        )
+    except ValueError as exc:
+        raise ProtocolError(INVALID_PARAMS, str(exc)) from exc
+    return evidence, context.strip() if isinstance(context, str) else None
 
 
 def decode_state_snapshot(value: Any) -> StateSnapshotV1:
