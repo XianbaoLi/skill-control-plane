@@ -223,7 +223,7 @@ export class PiSidecarAdapter {
     pi.registerTool({
       name: "apply_capability",
       label: "Apply capability",
-      description: "Commit selected Skills after discovery. CREATE requires purpose and creates a Bundle; EXTEND and DIRECT require target_bundle_id. For runtime reroute candidates, include reroute_evidence_id from the discovery projection.",
+      description: "Commit selected Skills after discovery. CREATE requires purpose and creates a Bundle; EXTEND and DIRECT require target_bundle_id. Every selected Skill requires a coverage item whose covered_by is exactly skill:<selected_skill_id>; existing Bundle coverage uses bundle:<active_bundle_id>. For runtime reroute candidates, include reroute_evidence_id from the discovery projection.",
       // Some OpenAI-compatible providers emit `{}` for JSON-schema unions.
       // Keep the provider-facing shape a plain object and put the conditional
       // contract in the description; the sidecar remains the strict validator.
@@ -236,8 +236,10 @@ export class PiSidecarAdapter {
         purpose: Type.Optional(Type.String({ minLength: 1,
           description: "Required for CREATE; omit for EXTEND and DIRECT." })),
         coverage: Type.Optional(Type.Array(Type.Object({
-          need: Type.String({ minLength: 1 }),
-          covered_by: Type.String({ minLength: 1 }),
+          need: Type.String({ minLength: 1,
+            description: "The concrete need covered by this selected Skill or active Bundle." }),
+          covered_by: Type.String({ minLength: 1,
+            description: "Use exactly skill:<selected_skill_id> or bundle:<active_bundle_id>; bare IDs are invalid." }),
         }))),
         remaining_gaps: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
         reroute_evidence_id: Type.Optional(Type.String({ minLength: 1 })),

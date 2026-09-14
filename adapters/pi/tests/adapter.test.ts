@@ -53,6 +53,11 @@ test("apply schema makes action-dependent fields unambiguous", () => {
   assert.deepEqual(tool.parameters.fields.action.string.enum, ["DIRECT", "EXTEND", "CREATE"]);
   assert.match(tool.parameters.fields.target_bundle_id.optional.string.description, /EXTEND/);
   assert.match(tool.parameters.fields.purpose.optional.string.description, /CREATE/);
+  assert.match(tool.description, /skill:<selected_skill_id>/);
+  assert.match(
+    tool.parameters.fields.coverage.optional.array.fields.covered_by.string.description,
+    /bare IDs are invalid/,
+  );
 });
 
 test("lifecycle maps to sidecar begin, end, compact and shutdown methods", async () => {
